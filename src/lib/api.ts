@@ -72,8 +72,41 @@ async function request<T>(
 export const api = {
   getDashboard: (telegramId: number | null) =>
     request<Dashboard>("GET", "/dashboard", telegramId),
-  listTransactions: (telegramId: number | null) =>
-    request<Transaction[]>("GET", "/transactions?limit=50", telegramId),
+  listTransactions: (
+    telegramId: number | null,
+    filters?: {
+      from?: string;
+      to?: string;
+      type?: string;
+      category_id?: string;
+      goal_id?: string;
+      limit?: number;
+    },
+  ) => {
+    const params = new URLSearchParams();
+    if (filters?.from) {
+      params.set("from", filters.from);
+    }
+    if (filters?.to) {
+      params.set("to", filters.to);
+    }
+    if (filters?.type) {
+      params.set("type", filters.type);
+    }
+    if (filters?.category_id) {
+      params.set("category_id", filters.category_id);
+    }
+    if (filters?.goal_id) {
+      params.set("goal_id", filters.goal_id);
+    }
+    params.set("limit", String(filters?.limit ?? 100));
+
+    return request<Transaction[]>(
+      "GET",
+      `/transactions?${params.toString()}`,
+      telegramId,
+    );
+  },
   parseTransaction: (telegramId: number | null, text: string) =>
     request<ParsedTransaction>("POST", "/transactions/parse", telegramId, { text }),
   listCategories: (telegramId: number | null) =>

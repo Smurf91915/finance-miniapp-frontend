@@ -77,6 +77,14 @@ interface SubcategoryEditFormState {
   sortOrder: string;
 }
 
+interface HistoryFilterState {
+  from: string;
+  to: string;
+  type: string;
+  categoryId: string;
+  goalId: string;
+}
+
 const defaultFormState: AddFormState = {
   mode: "expense",
   amount: "",
@@ -109,6 +117,14 @@ const defaultSubcategoryFormState: SubcategoryCreateFormState = {
   categoryId: "",
   name: "",
   sortOrder: "0",
+};
+
+const defaultHistoryFilterState: HistoryFilterState = {
+  from: "",
+  to: "",
+  type: "",
+  categoryId: "",
+  goalId: "",
 };
 
 function categoryEditStateFromItem(category: Category): CategoryEditFormState {
@@ -332,6 +348,9 @@ export default function App() {
   const [goalAnalytics, setGoalAnalytics] = useState<GoalAnalytics | null>(null);
   const [spending, setSpending] = useState<SpendingAnalytics | null>(null);
   const [recurring, setRecurring] = useState<RecurringExpense[]>([]);
+  const [historyFilters, setHistoryFilters] =
+    useState<HistoryFilterState>(defaultHistoryFilterState);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [form, setForm] = useState<AddFormState>(() => buildDefaultFormState());
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -378,8 +397,45 @@ export default function App() {
     setTelegramId(getTelegramUserId());
   }, []);
 
+  function buildTransactionFilters(filters: HistoryFilterState) {
+    return {
+      from: filters.from || undefined,
+      to: filters.to || undefined,
+      type: filters.type || undefined,
+      category_id: filters.categoryId || undefined,
+      goal_id: filters.goalId || undefined,
+      limit: 100,
+    };
+  }
+
+  async function reloadTransactions(
+    currentTelegramId: number | null,
+    filters: HistoryFilterState = historyFilters,
+  ) {
+    setHistoryLoading(true);
+
+    try {
+      const transactionsData = await api.listTransactions(
+        currentTelegramId,
+        buildTransactionFilters(filters),
+      );
+      startTransition(() => {
+        setTransactions(transactionsData);
+      });
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Не удалось загрузить историю операций.",
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
   async function reloadData(currentTelegramId: number | null) {
     setLoading(true);
+    setHistoryLoading(true);
     setError(null);
 
     try {
@@ -393,7 +449,7 @@ export default function App() {
         recurringData,
       ] = await Promise.all([
         api.getDashboard(currentTelegramId),
-        api.listTransactions(currentTelegramId),
+        api.listTransactions(currentTelegramId, buildTransactionFilters(historyFilters)),
         api.listCategories(currentTelegramId),
         api.listGoals(currentTelegramId),
         api.getSpendingAnalytics(currentTelegramId),
@@ -413,6 +469,7 @@ export default function App() {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Не удалось загрузить данные.");
     } finally {
+      setHistoryLoading(false);
       setLoading(false);
     }
   }
@@ -1183,6 +1240,19 @@ export default function App() {
     } finally {
       setCreatingRecurringFromTransactionId(null);
     }
+  }
+
+  async function applyHistoryFilters() {
+    setError(null);
+    setSuccess(null);
+    await reloadTransactions(telegramId, historyFilters);
+  }
+
+  async function resetHistoryFilters() {
+    setError(null);
+    setSuccess(null);
+    setHistoryFilters(defaultHistoryFilterState);
+    await reloadTransactions(telegramId, defaultHistoryFilterState);
   }
 
   async function handleRecurringToggle(item: RecurringExpense) {
@@ -2265,6 +2335,122 @@ export default function App() {
         {!loading && activeTab === "history" ? (
           <div className="stack">
             <SectionCard eyebrow="Журнал" title="История операций">
+              <div className="history-filters">
+                <div className="inline-grid">
+                  <label className="field">
+                    <span>С даты</span>
+                    <input
+                      type="date"
+                      value={historyFilters.from}
+                      onChange={(event) =>
+                        setHistoryFilters((current) => ({
+                          ...current,
+                          from: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>По дату</span>
+                    <input
+                      type="date"
+                      value={historyFilters.to}
+                      onChange={(event) =>
+                        setHistoryFilters((current) => ({
+                          ...current,
+                          to: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="inline-grid">
+                  <label className="field">
+                    <span>Тип</span>
+                    <select
+                      value={historyFilters.type}
+                      onChange={(event) =>
+                        setHistoryFilters((current) => ({
+                          ...current,
+                          type: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Все типы</option>
+                      <option value="expense">Расход</option>
+                      <option value="income">Доход</option>
+                      <option value="investment">Инвестиция</option>
+                      <option value="goal_allocation">Накопление</option>
+                      <option value="refund">Возврат</option>
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Категория</span>
+                    <select
+                      value={historyFilters.categoryId}
+                      onChange={(event) =>
+                        setHistoryFilters((current) => ({
+                          ...current,
+                          categoryId: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Все категории</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <label className="field">
+                  <span>Цель</span>
+                  <select
+                    value={historyFilters.goalId}
+                    onChange={(event) =>
+                      setHistoryFilters((current) => ({
+                        ...current,
+                        goalId: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Все цели</option>
+                    {goals.map((goal) => (
+                      <option key={goal.id} value={goal.id}>
+                        {goal.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="history-filters__actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={historyLoading}
+                    onClick={() => void applyHistoryFilters()}
+                  >
+                    {historyLoading ? "Применяю…" : "Применить"}
+                  </button>
+                  <button
+                    type="button"
+                    className="section-card__action"
+                    disabled={historyLoading}
+                    onClick={() => void resetHistoryFilters()}
+                  >
+                    Сбросить
+                  </button>
+                </div>
+              </div>
+
+              {historyLoading ? (
+                <div className="loading-card">Обновляю историю операций…</div>
+              ) : (
               <div className="transaction-list">
                 {transactions.map((transaction) => {
                   const remainingMinor = refundableRemainingMinor(
@@ -2378,7 +2564,13 @@ export default function App() {
                   </article>
                   );
                 })}
+                {transactions.length === 0 ? (
+                  <div className="empty-state">
+                    По выбранным фильтрам операций не нашлось.
+                  </div>
+                ) : null}
               </div>
+              )}
             </SectionCard>
           </div>
         ) : null}
