@@ -247,6 +247,15 @@ export const api = {
       telegramId,
       payload,
     ),
+  createRecurringExpenseFromTransaction: (
+    telegramId: number | null,
+    transactionId: string,
+  ) =>
+    request<RecurringExpense>(
+      "POST",
+      `/recurring-expenses/from-transaction/${transactionId}`,
+      telegramId,
+    ),
   updateRecurringExpense: (
     telegramId: number | null,
     recurringId: string,

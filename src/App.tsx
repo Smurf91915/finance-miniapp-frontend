@@ -304,6 +304,8 @@ export default function App() {
   const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null);
   const [recurringSubmittingId, setRecurringSubmittingId] = useState<string | null>(null);
   const [recurringForm, setRecurringForm] = useState<RecurringEditFormState | null>(null);
+  const [creatingRecurringFromTransactionId, setCreatingRecurringFromTransactionId] =
+    useState<string | null>(null);
   const [showGoalCreateForm, setShowGoalCreateForm] = useState(false);
   const [goalSubmitting, setGoalSubmitting] = useState(false);
   const [goalForm, setGoalForm] = useState<GoalCreateFormState>(defaultGoalFormState);
@@ -1119,6 +1121,31 @@ export default function App() {
       );
     } finally {
       setRecurringSubmittingId(null);
+    }
+  }
+
+  async function handleCreateRecurringFromTransaction(transaction: Transaction) {
+    if (transaction.type !== "expense") {
+      setError("Шаблон регулярной траты можно создать только из расхода.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setCreatingRecurringFromTransactionId(transaction.id);
+
+    try {
+      await api.createRecurringExpenseFromTransaction(telegramId, transaction.id);
+      setSuccess("Регулярная трата создана из этой операции.");
+      await reloadData(telegramId);
+    } catch (createError) {
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : "Не удалось создать регулярную трату из операции.",
+      );
+    } finally {
+      setCreatingRecurringFromTransactionId(null);
     }
   }
 
@@ -2278,6 +2305,20 @@ export default function App() {
                             {isRefundDraftOpen
                               ? "Изменить возврат"
                               : `Вернуть до ${formatMinor(remainingMinor)}`}
+                          </button>
+                        ) : null}
+                        {transaction.type === "expense" ? (
+                          <button
+                            type="button"
+                            className="transaction-row__action transaction-row__action--muted"
+                            disabled={creatingRecurringFromTransactionId === transaction.id}
+                            onClick={() =>
+                              void handleCreateRecurringFromTransaction(transaction)
+                            }
+                          >
+                            {creatingRecurringFromTransactionId === transaction.id
+                              ? "Создаю…"
+                              : "В регулярные"}
                           </button>
                         ) : null}
                         {canDeleteTransaction(transaction, transactions) ? (
