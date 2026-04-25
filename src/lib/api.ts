@@ -2,6 +2,7 @@ import {
   Category,
   Dashboard,
   Goal,
+  GoalHistoryItem,
   GoalAnalytics,
   RecurringExpense,
   SpendingAnalytics,
@@ -75,6 +76,17 @@ export const api = {
     request<Category[]>("GET", "/categories", telegramId),
   listGoals: (telegramId: number | null) =>
     request<Goal[]>("GET", "/goals", telegramId),
+  createGoal: (
+    telegramId: number | null,
+    payload: {
+      kind: string;
+      name: string;
+      target_amount_minor?: number | null;
+      sort_order?: number;
+    },
+  ) => request<Goal>("POST", "/goals", telegramId, payload),
+  getGoalHistory: (telegramId: number | null, goalId: string) =>
+    request<GoalHistoryItem[]>(`GET`, `/goals/${goalId}/history`, telegramId),
   getSpendingAnalytics: (telegramId: number | null) =>
     request<SpendingAnalytics>("GET", "/analytics/spending", telegramId),
   getGoalsAnalytics: (telegramId: number | null) =>

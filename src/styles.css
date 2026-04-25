@@ -480,6 +480,29 @@ button {
   margin-top: 12px;
 }
 
+.goal-create-form,
+.goal-history-list {
+  display: grid;
+  gap: 12px;
+}
+
+.goal-create-form__actions,
+.goal-tile__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.goal-tile__target {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.goal-tile__actions {
+  margin-top: 14px;
+}
+
 .goal-tile {
   padding: 16px;
   border-radius: 20px;
@@ -500,6 +523,17 @@ button {
 .goal-progress {
   display: grid;
   gap: 8px;
+}
+
+.goal-history-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 250, 241, 0.84);
 }
 
 .goal-progress__head,
@@ -606,6 +640,10 @@ button {
 
   .recurring-item__actions {
     justify-content: flex-start;
+  }
+
+  .goal-history-item {
+    flex-direction: column;
   }
 
   .bottom-nav {

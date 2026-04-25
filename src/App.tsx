@@ -10,6 +10,7 @@ import type {
   Dashboard,
   Goal,
   GoalAnalytics,
+  GoalHistoryItem,
   RecurringExpense,
   SpendingAnalytics,
   Transaction,
@@ -44,6 +45,13 @@ interface RecurringEditFormState {
   note: string;
 }
 
+interface GoalCreateFormState {
+  name: string;
+  kind: "reserve" | "deposit" | "custom";
+  targetAmount: string;
+  sortOrder: string;
+}
+
 const defaultFormState: AddFormState = {
   mode: "expense",
   amount: "",
@@ -56,6 +64,13 @@ const defaultFormState: AddFormState = {
   recurringKind: "fixed",
   recurringCadence: "monthly",
   recurringDay: "",
+};
+
+const defaultGoalFormState: GoalCreateFormState = {
+  name: "",
+  kind: "custom",
+  targetAmount: "",
+  sortOrder: "0",
 };
 
 function formatMinor(amountMinor: number): string {
@@ -103,6 +118,19 @@ function friendlyCadence(cadence: string): string {
       return "Своя периодичность";
     default:
       return cadence;
+  }
+}
+
+function friendlyGoalKind(kind: string): string {
+  switch (kind) {
+    case "reserve":
+      return "Финансовая подушка";
+    case "deposit":
+      return "Накопительный контур";
+    case "custom":
+      return "Своя цель";
+    default:
+      return kind;
   }
 }
 
@@ -214,6 +242,12 @@ export default function App() {
   const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null);
   const [recurringSubmittingId, setRecurringSubmittingId] = useState<string | null>(null);
   const [recurringForm, setRecurringForm] = useState<RecurringEditFormState | null>(null);
+  const [showGoalCreateForm, setShowGoalCreateForm] = useState(false);
+  const [goalSubmitting, setGoalSubmitting] = useState(false);
+  const [goalForm, setGoalForm] = useState<GoalCreateFormState>(defaultGoalFormState);
+  const [goalHistoryId, setGoalHistoryId] = useState<string | null>(null);
+  const [goalHistoryItems, setGoalHistoryItems] = useState<GoalHistoryItem[]>([]);
+  const [goalHistoryLoading, setGoalHistoryLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -437,6 +471,103 @@ export default function App() {
           ? recurringError.message
           : "Не удалось создать регулярную трату.",
       );
+    }
+  }
+
+  function startGoalCreate() {
+    setError(null);
+    setSuccess(null);
+    setShowGoalCreateForm(true);
+  }
+
+  function cancelGoalCreate() {
+    setShowGoalCreateForm(false);
+    setGoalForm(defaultGoalFormState);
+  }
+
+  async function handleGoalCreate() {
+    if (!goalForm.name.trim()) {
+      setError("Укажи название цели.");
+      return;
+    }
+
+    let targetAmountMinor: number | null = null;
+    if (goalForm.targetAmount.trim()) {
+      targetAmountMinor = toMinor(goalForm.targetAmount);
+      if (!targetAmountMinor) {
+        setError("Целевая сумма должна быть больше нуля.");
+        return;
+      }
+    }
+
+    const sortOrder = Number(goalForm.sortOrder || "0");
+    if (!Number.isInteger(sortOrder)) {
+      setError("Порядок должен быть целым числом.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setGoalSubmitting(true);
+
+    try {
+      await api.createGoal(telegramId, {
+        name: goalForm.name.trim(),
+        kind: goalForm.kind,
+        target_amount_minor: targetAmountMinor,
+        sort_order: sortOrder,
+      });
+      setSuccess("Цель создана.");
+      cancelGoalCreate();
+      await reloadData(telegramId);
+    } catch (createError) {
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : "Не удалось создать цель.",
+      );
+    } finally {
+      setGoalSubmitting(false);
+    }
+  }
+
+  function startGoalAllocation(goal: Goal) {
+    setEditingTransactionId(null);
+    setError(null);
+    setSuccess(null);
+    setForm({
+      ...defaultFormState,
+      mode: "goal_allocation",
+      goalId: goal.id,
+    });
+    setActiveTab("add");
+  }
+
+  async function openGoalHistory(goal: Goal) {
+    if (goalHistoryId === goal.id) {
+      setGoalHistoryId(null);
+      setGoalHistoryItems([]);
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setGoalHistoryId(goal.id);
+    setGoalHistoryLoading(true);
+
+    try {
+      const items = await api.getGoalHistory(telegramId, goal.id);
+      setGoalHistoryItems(items);
+    } catch (historyError) {
+      setGoalHistoryId(null);
+      setGoalHistoryItems([]);
+      setError(
+        historyError instanceof Error
+          ? historyError.message
+          : "Не удалось загрузить историю цели.",
+      );
+    } finally {
+      setGoalHistoryLoading(false);
     }
   }
 
@@ -1496,15 +1627,165 @@ export default function App() {
 
         {!loading && activeTab === "goals" ? (
           <div className="stack">
-            <SectionCard eyebrow="Накопления" title="Цели и резервы">
+            <SectionCard
+              eyebrow="Накопления"
+              title="Цели и резервы"
+              action={
+                <button
+                  type="button"
+                  className="section-card__action"
+                  onClick={showGoalCreateForm ? cancelGoalCreate : startGoalCreate}
+                >
+                  {showGoalCreateForm ? "Скрыть форму" : "Новая цель"}
+                </button>
+              }
+            >
+              {showGoalCreateForm ? (
+                <div className="goal-create-form">
+                  <label className="field">
+                    <span>Название</span>
+                    <input
+                      type="text"
+                      placeholder="Например, отпуск или подушка"
+                      value={goalForm.name}
+                      onChange={(event) =>
+                        setGoalForm((current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                      disabled={goalSubmitting}
+                    />
+                  </label>
+
+                  <div className="inline-grid">
+                    <label className="field">
+                      <span>Тип</span>
+                      <select
+                        value={goalForm.kind}
+                        onChange={(event) =>
+                          setGoalForm((current) => ({
+                            ...current,
+                            kind: event.target.value as "reserve" | "deposit" | "custom",
+                          }))
+                        }
+                        disabled={goalSubmitting}
+                      >
+                        <option value="reserve">Подушка</option>
+                        <option value="deposit">Накопление</option>
+                        <option value="custom">Своя цель</option>
+                      </select>
+                    </label>
+
+                    <label className="field">
+                      <span>Целевая сумма</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        placeholder="Можно оставить пустым"
+                        value={goalForm.targetAmount}
+                        onChange={(event) =>
+                          setGoalForm((current) => ({
+                            ...current,
+                            targetAmount: event.target.value,
+                          }))
+                        }
+                        disabled={goalSubmitting}
+                      />
+                    </label>
+                  </div>
+
+                  <label className="field">
+                    <span>Порядок</span>
+                    <input
+                      type="number"
+                      value={goalForm.sortOrder}
+                      onChange={(event) =>
+                        setGoalForm((current) => ({
+                          ...current,
+                          sortOrder: event.target.value,
+                        }))
+                      }
+                      disabled={goalSubmitting}
+                    />
+                  </label>
+
+                  <div className="goal-create-form__actions">
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={goalSubmitting}
+                      onClick={() => void handleGoalCreate()}
+                    >
+                      {goalSubmitting ? "Создаю…" : "Создать цель"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={goalSubmitting}
+                      onClick={cancelGoalCreate}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="goal-grid">
-                {goals.map((goal) => (
-                  <article key={goal.id} className="goal-tile goal-tile--large">
-                    <span>{goal.name}</span>
-                    <strong>{formatMinor(goal.balance_minor)}</strong>
-                    <small>{goal.kind === "reserve" ? "Финансовая подушка" : "Накопительный контур"}</small>
-                  </article>
-                ))}
+                {goals.map((goal) => {
+                  const targetProgress = goal.target_amount_minor
+                    ? Math.min(
+                        100,
+                        Math.max(
+                          6,
+                          (goal.balance_minor / Math.max(goal.target_amount_minor, 1)) * 100,
+                        ),
+                      )
+                    : 0;
+
+                  return (
+                    <article key={goal.id} className="goal-tile goal-tile--large">
+                      <span>{goal.name}</span>
+                      <strong>{formatMinor(goal.balance_minor)}</strong>
+                      <small>{friendlyGoalKind(goal.kind)}</small>
+                      {goal.target_amount_minor ? (
+                        <div className="goal-tile__target">
+                          Цель: {formatMinor(goal.target_amount_minor)}
+                        </div>
+                      ) : (
+                        <div className="goal-tile__target">Цель без лимита</div>
+                      )}
+                      {goal.target_amount_minor ? (
+                        <div className="category-bar__track">
+                          <div
+                            className="category-bar__fill category-bar__fill--warm"
+                            style={{ width: `${targetProgress}%` }}
+                          />
+                        </div>
+                      ) : null}
+                      <div className="goal-tile__actions">
+                        <button
+                          type="button"
+                          className="transaction-row__action"
+                          onClick={() => startGoalAllocation(goal)}
+                        >
+                          Пополнить
+                        </button>
+                        <button
+                          type="button"
+                          className="transaction-row__action transaction-row__action--muted"
+                          onClick={() => void openGoalHistory(goal)}
+                        >
+                          {goalHistoryId === goal.id ? "Скрыть историю" : "История"}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+                {goals.length === 0 ? (
+                  <div className="empty-state">
+                    Целей пока нет. Создай первую цель прямо на этой вкладке.
+                  </div>
+                ) : null}
               </div>
             </SectionCard>
 
@@ -1538,6 +1819,39 @@ export default function App() {
                 ))}
               </div>
             </SectionCard>
+
+            {goalHistoryId ? (
+              <SectionCard eyebrow="История цели" title="Последние пополнения">
+                {goalHistoryLoading ? (
+                  <div className="loading-card">Загружаю историю цели…</div>
+                ) : goalHistoryItems.length > 0 ? (
+                  <div className="goal-history-list">
+                    {goalHistoryItems.map((item) => (
+                      <article key={item.id} className="goal-history-item">
+                        <div>
+                          <div className="transaction-row__title">
+                            {item.type === "goal_allocation"
+                              ? "Пополнение цели"
+                              : item.type}
+                          </div>
+                          <div className="transaction-row__meta">
+                            {new Date(item.occurred_at).toLocaleString("ru-RU")}
+                          </div>
+                          {item.note ? (
+                            <div className="transaction-row__note">{item.note}</div>
+                          ) : null}
+                        </div>
+                        <strong>{formatMinor(item.amount_minor)}</strong>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    По этой цели пока нет операций.
+                  </div>
+                )}
+              </SectionCard>
+            ) : null}
           </div>
         ) : null}
       </main>
