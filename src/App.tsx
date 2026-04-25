@@ -161,6 +161,10 @@ function formatDateTimeLocalValue(date: Date): string {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
+function formatDateInputValue(date: Date): string {
+  return formatDateTimeLocalValue(date).slice(0, 10);
+}
+
 function nowDateTimeLocalValue(): string {
   return formatDateTimeLocalValue(new Date());
 }
@@ -1255,6 +1259,35 @@ export default function App() {
     await reloadTransactions(telegramId, defaultHistoryFilterState);
   }
 
+  async function applyHistoryPreset(preset: "today" | "week" | "month") {
+    const now = new Date();
+    const nextFilters = { ...defaultHistoryFilterState };
+
+    if (preset === "today") {
+      const today = formatDateInputValue(now);
+      nextFilters.from = today;
+      nextFilters.to = today;
+    }
+
+    if (preset === "week") {
+      const from = new Date(now);
+      from.setDate(now.getDate() - 6);
+      nextFilters.from = formatDateInputValue(from);
+      nextFilters.to = formatDateInputValue(now);
+    }
+
+    if (preset === "month") {
+      const from = new Date(now.getFullYear(), now.getMonth(), 1);
+      nextFilters.from = formatDateInputValue(from);
+      nextFilters.to = formatDateInputValue(now);
+    }
+
+    setError(null);
+    setSuccess(null);
+    setHistoryFilters(nextFilters);
+    await reloadTransactions(telegramId, nextFilters);
+  }
+
   async function handleRecurringToggle(item: RecurringExpense) {
     setError(null);
     setSuccess(null);
@@ -2336,6 +2369,33 @@ export default function App() {
           <div className="stack">
             <SectionCard eyebrow="Журнал" title="История операций">
               <div className="history-filters">
+                <div className="history-filters__presets">
+                  <button
+                    type="button"
+                    className="section-card__action"
+                    disabled={historyLoading}
+                    onClick={() => void applyHistoryPreset("today")}
+                  >
+                    Сегодня
+                  </button>
+                  <button
+                    type="button"
+                    className="section-card__action"
+                    disabled={historyLoading}
+                    onClick={() => void applyHistoryPreset("week")}
+                  >
+                    7 дней
+                  </button>
+                  <button
+                    type="button"
+                    className="section-card__action"
+                    disabled={historyLoading}
+                    onClick={() => void applyHistoryPreset("month")}
+                  >
+                    Месяц
+                  </button>
+                </div>
+
                 <div className="inline-grid">
                   <label className="field">
                     <span>С даты</span>
@@ -2446,6 +2506,12 @@ export default function App() {
                     Сбросить
                   </button>
                 </div>
+              </div>
+
+              <div className="history-summary">
+                {historyLoading
+                  ? "Обновляю список операций…"
+                  : `Найдено операций: ${transactions.length}`}
               </div>
 
               {historyLoading ? (

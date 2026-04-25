@@ -628,10 +628,16 @@ button {
   gap: 12px;
 }
 
+.history-filters__presets,
 .history-filters__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.history-summary {
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .goal-progress__head,
@@ -753,6 +759,7 @@ button {
   .category-manager__actions,
   .quick-entry__meta,
   .quick-entry__actions,
+  .history-filters__presets,
   .history-filters__actions {
     flex-direction: column;
     align-items: flex-start;
