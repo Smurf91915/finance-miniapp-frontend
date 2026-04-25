@@ -52,6 +52,18 @@ interface GoalCreateFormState {
   sortOrder: string;
 }
 
+interface CategoryCreateFormState {
+  kind: "expense" | "investment";
+  name: string;
+  sortOrder: string;
+}
+
+interface SubcategoryCreateFormState {
+  categoryId: string;
+  name: string;
+  sortOrder: string;
+}
+
 const defaultFormState: AddFormState = {
   mode: "expense",
   amount: "",
@@ -70,6 +82,18 @@ const defaultGoalFormState: GoalCreateFormState = {
   name: "",
   kind: "custom",
   targetAmount: "",
+  sortOrder: "0",
+};
+
+const defaultCategoryFormState: CategoryCreateFormState = {
+  kind: "expense",
+  name: "",
+  sortOrder: "0",
+};
+
+const defaultSubcategoryFormState: SubcategoryCreateFormState = {
+  categoryId: "",
+  name: "",
   sortOrder: "0",
 };
 
@@ -248,6 +272,14 @@ export default function App() {
   const [goalHistoryId, setGoalHistoryId] = useState<string | null>(null);
   const [goalHistoryItems, setGoalHistoryItems] = useState<GoalHistoryItem[]>([]);
   const [goalHistoryLoading, setGoalHistoryLoading] = useState(false);
+  const [categoryForm, setCategoryForm] =
+    useState<CategoryCreateFormState>(defaultCategoryFormState);
+  const [subcategoryForm, setSubcategoryForm] =
+    useState<SubcategoryCreateFormState>(defaultSubcategoryFormState);
+  const [categorySubmitting, setCategorySubmitting] = useState(false);
+  const [subcategorySubmitting, setSubcategorySubmitting] = useState(false);
+  const [categoryUpdatingId, setCategoryUpdatingId] = useState<string | null>(null);
+  const [subcategoryUpdatingId, setSubcategoryUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -308,11 +340,17 @@ export default function App() {
     }
   }, [goals, form.goalId]);
 
-  const availableExpenseCategories = categories.filter(
+  const expenseCategories = categories.filter(
+    (category) => category.kind === "expense",
+  );
+  const investmentCategories = categories.filter(
+    (category) => category.kind === "investment",
+  );
+  const availableExpenseCategories = expenseCategories.filter(
     (category) => category.kind === "expense" && !category.is_archived,
   );
-  const availableInvestmentCategories = categories.filter(
-    (category) => category.kind === "investment" && !category.is_archived,
+  const availableInvestmentCategories = investmentCategories.filter(
+    (category) => !category.is_archived,
   );
   const selectedCategory =
     categories.find((category) => category.id === form.categoryId) ?? null;
@@ -327,6 +365,21 @@ export default function App() {
       : null;
   const recurringEditSubcategories =
     recurringEditCategory?.subcategories.filter((subcategory) => !subcategory.is_archived) ?? [];
+  const availableSubcategoryCategories = categories.filter(
+    (category) => !category.is_archived,
+  );
+  const categoryGroups = [
+    {
+      key: "expense",
+      title: "Расходы",
+      items: expenseCategories,
+    },
+    {
+      key: "investment",
+      title: "Инвестиции",
+      items: investmentCategories,
+    },
+  ] as const;
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -568,6 +621,148 @@ export default function App() {
       );
     } finally {
       setGoalHistoryLoading(false);
+    }
+  }
+
+  async function handleCategoryCreate() {
+    if (!categoryForm.name.trim()) {
+      setError("Укажи название категории.");
+      return;
+    }
+
+    const sortOrder = Number(categoryForm.sortOrder || "0");
+    if (!Number.isInteger(sortOrder)) {
+      setError("Порядок категории должен быть целым числом.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setCategorySubmitting(true);
+
+    try {
+      const created = await api.createCategory(telegramId, {
+        kind: categoryForm.kind,
+        name: categoryForm.name.trim(),
+        sort_order: sortOrder,
+      });
+      setCategoryForm({
+        ...defaultCategoryFormState,
+        kind: categoryForm.kind,
+      });
+      setSubcategoryForm((current) => ({
+        ...current,
+        categoryId: current.categoryId || created.id,
+      }));
+      setSuccess("Категория создана.");
+      await reloadData(telegramId);
+    } catch (createError) {
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : "Не удалось создать категорию.",
+      );
+    } finally {
+      setCategorySubmitting(false);
+    }
+  }
+
+  async function handleSubcategoryCreate() {
+    if (!subcategoryForm.categoryId) {
+      setError("Выбери категорию для подкатегории.");
+      return;
+    }
+
+    if (!subcategoryForm.name.trim()) {
+      setError("Укажи название подкатегории.");
+      return;
+    }
+
+    const sortOrder = Number(subcategoryForm.sortOrder || "0");
+    if (!Number.isInteger(sortOrder)) {
+      setError("Порядок подкатегории должен быть целым числом.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setSubcategorySubmitting(true);
+
+    try {
+      await api.createSubcategory(telegramId, {
+        category_id: subcategoryForm.categoryId,
+        name: subcategoryForm.name.trim(),
+        sort_order: sortOrder,
+      });
+      setSubcategoryForm((current) => ({
+        ...defaultSubcategoryFormState,
+        categoryId: current.categoryId,
+      }));
+      setSuccess("Подкатегория создана.");
+      await reloadData(telegramId);
+    } catch (createError) {
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : "Не удалось создать подкатегорию.",
+      );
+    } finally {
+      setSubcategorySubmitting(false);
+    }
+  }
+
+  async function handleCategoryArchiveToggle(category: Category) {
+    setError(null);
+    setSuccess(null);
+    setCategoryUpdatingId(category.id);
+
+    try {
+      await api.updateCategory(telegramId, category.id, {
+        is_archived: !category.is_archived,
+      });
+      setSuccess(
+        category.is_archived
+          ? "Категория возвращена в активные."
+          : "Категория отправлена в архив.",
+      );
+      await reloadData(telegramId);
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Не удалось изменить статус категории.",
+      );
+    } finally {
+      setCategoryUpdatingId(null);
+    }
+  }
+
+  async function handleSubcategoryArchiveToggle(
+    subcategoryId: string,
+    isArchived: boolean,
+  ) {
+    setError(null);
+    setSuccess(null);
+    setSubcategoryUpdatingId(subcategoryId);
+
+    try {
+      await api.updateSubcategory(telegramId, subcategoryId, {
+        is_archived: !isArchived,
+      });
+      setSuccess(
+        isArchived
+          ? "Подкатегория возвращена в активные."
+          : "Подкатегория отправлена в архив.",
+      );
+      await reloadData(telegramId);
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Не удалось изменить статус подкатегории.",
+      );
+    } finally {
+      setSubcategoryUpdatingId(null);
     }
   }
 
@@ -1196,6 +1391,235 @@ export default function App() {
                   >
                     Добавить в регулярные
                   </button>
+                </div>
+              </SectionCard>
+            ) : null}
+
+            {!editingTransaction ? (
+              <SectionCard eyebrow="Справочник" title="Категории и подкатегории">
+                <div className="category-manager">
+                  <div className="category-manager__forms">
+                    <div className="category-manager__card">
+                      <h3 className="category-manager__title">Новая категория</h3>
+                      <div className="finance-form">
+                        <div className="inline-grid">
+                          <label className="field">
+                            <span>Тип</span>
+                            <select
+                              value={categoryForm.kind}
+                              onChange={(event) =>
+                                setCategoryForm((current) => ({
+                                  ...current,
+                                  kind: event.target.value as "expense" | "investment",
+                                }))
+                              }
+                              disabled={categorySubmitting}
+                            >
+                              <option value="expense">Расход</option>
+                              <option value="investment">Инвестиция</option>
+                            </select>
+                          </label>
+
+                          <label className="field">
+                            <span>Порядок</span>
+                            <input
+                              type="number"
+                              value={categoryForm.sortOrder}
+                              onChange={(event) =>
+                                setCategoryForm((current) => ({
+                                  ...current,
+                                  sortOrder: event.target.value,
+                                }))
+                              }
+                              disabled={categorySubmitting}
+                            />
+                          </label>
+                        </div>
+
+                        <label className="field">
+                          <span>Название</span>
+                          <input
+                            type="text"
+                            placeholder="Например, Здоровье или Брокерский счет"
+                            value={categoryForm.name}
+                            onChange={(event) =>
+                              setCategoryForm((current) => ({
+                                ...current,
+                                name: event.target.value,
+                              }))
+                            }
+                            disabled={categorySubmitting}
+                          />
+                        </label>
+
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          disabled={categorySubmitting}
+                          onClick={() => void handleCategoryCreate()}
+                        >
+                          {categorySubmitting ? "Создаю…" : "Создать категорию"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="category-manager__card">
+                      <h3 className="category-manager__title">Новая подкатегория</h3>
+                      <div className="finance-form">
+                        <label className="field">
+                          <span>Категория</span>
+                          <select
+                            value={subcategoryForm.categoryId}
+                            onChange={(event) =>
+                              setSubcategoryForm((current) => ({
+                                ...current,
+                                categoryId: event.target.value,
+                              }))
+                            }
+                            disabled={subcategorySubmitting}
+                          >
+                            <option value="">Выбери категорию</option>
+                            {availableSubcategoryCategories.map((category) => (
+                              <option key={category.id} value={category.id}>
+                                {category.kind === "expense" ? "Расход" : "Инвестиция"} ·{" "}
+                                {category.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <div className="inline-grid">
+                          <label className="field">
+                            <span>Название</span>
+                            <input
+                              type="text"
+                              placeholder="Например, Кафе или ETF"
+                              value={subcategoryForm.name}
+                              onChange={(event) =>
+                                setSubcategoryForm((current) => ({
+                                  ...current,
+                                  name: event.target.value,
+                                }))
+                              }
+                              disabled={subcategorySubmitting}
+                            />
+                          </label>
+
+                          <label className="field">
+                            <span>Порядок</span>
+                            <input
+                              type="number"
+                              value={subcategoryForm.sortOrder}
+                              onChange={(event) =>
+                                setSubcategoryForm((current) => ({
+                                  ...current,
+                                  sortOrder: event.target.value,
+                                }))
+                              }
+                              disabled={subcategorySubmitting}
+                            />
+                          </label>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          disabled={subcategorySubmitting}
+                          onClick={() => void handleSubcategoryCreate()}
+                        >
+                          {subcategorySubmitting ? "Создаю…" : "Создать подкатегорию"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="category-manager__groups">
+                    {categoryGroups.map((group) => (
+                      <div key={group.key} className="category-manager__group">
+                        <h3 className="category-manager__title">{group.title}</h3>
+                        <div className="category-manager__list">
+                          {group.items.map((category) => (
+                            <article key={category.id} className="category-manager__item">
+                              <div className="category-manager__head">
+                                <div>
+                                  <strong>{category.name}</strong>
+                                  <div className="transaction-row__meta">
+                                    Порядок: {category.sort_order}
+                                  </div>
+                                </div>
+                                <div className="category-manager__actions">
+                                  {category.is_archived ? (
+                                    <span className="category-manager__badge">В архиве</span>
+                                  ) : null}
+                                  <button
+                                    type="button"
+                                    className="transaction-row__action transaction-row__action--muted"
+                                    disabled={categoryUpdatingId === category.id}
+                                    onClick={() => void handleCategoryArchiveToggle(category)}
+                                  >
+                                    {categoryUpdatingId === category.id
+                                      ? "Обновляю…"
+                                      : category.is_archived
+                                        ? "Вернуть"
+                                        : "В архив"}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {category.subcategories.length > 0 ? (
+                                <div className="category-manager__sublist">
+                                  {category.subcategories.map((subcategory) => (
+                                    <div
+                                      key={subcategory.id}
+                                      className="category-manager__subitem"
+                                    >
+                                      <div>
+                                        <strong>{subcategory.name}</strong>
+                                        <div className="transaction-row__meta">
+                                          Порядок: {subcategory.sort_order}
+                                        </div>
+                                      </div>
+                                      <div className="category-manager__actions">
+                                        {subcategory.is_archived ? (
+                                          <span className="category-manager__badge">
+                                            В архиве
+                                          </span>
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          className="transaction-row__action transaction-row__action--muted"
+                                          disabled={subcategoryUpdatingId === subcategory.id}
+                                          onClick={() =>
+                                            void handleSubcategoryArchiveToggle(
+                                              subcategory.id,
+                                              subcategory.is_archived,
+                                            )
+                                          }
+                                        >
+                                          {subcategoryUpdatingId === subcategory.id
+                                            ? "Обновляю…"
+                                            : subcategory.is_archived
+                                              ? "Вернуть"
+                                              : "В архив"}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="transaction-row__meta">
+                                  Подкатегорий пока нет.
+                                </div>
+                              )}
+                            </article>
+                          ))}
+                          {group.items.length === 0 ? (
+                            <div className="empty-state">Пока пусто.</div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </SectionCard>
             ) : null}
