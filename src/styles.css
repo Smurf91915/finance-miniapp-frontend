@@ -563,6 +563,11 @@ button {
   font-size: 1rem;
 }
 
+.category-manager__edit-form {
+  flex: 1;
+  min-width: 0;
+}
+
 .category-manager__head,
 .category-manager__subitem,
 .category-manager__actions {
