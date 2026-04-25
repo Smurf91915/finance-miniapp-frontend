@@ -33,6 +33,17 @@ interface AddFormState {
   recurringDay: string;
 }
 
+interface RecurringEditFormState {
+  name: string;
+  categoryId: string;
+  subcategoryId: string;
+  kind: "fixed" | "variable";
+  cadence: "monthly" | "yearly" | "custom";
+  expectedAmount: string;
+  dayOfMonth: string;
+  note: string;
+}
+
 const defaultFormState: AddFormState = {
   mode: "expense",
   amount: "",
@@ -79,6 +90,19 @@ function friendlyType(type: TransactionType): string {
       return "Возврат";
     default:
       return type;
+  }
+}
+
+function friendlyCadence(cadence: string): string {
+  switch (cadence) {
+    case "monthly":
+      return "Ежемесячно";
+    case "yearly":
+      return "Ежегодно";
+    case "custom":
+      return "Своя периодичность";
+    default:
+      return cadence;
   }
 }
 
@@ -154,6 +178,21 @@ function toInputAmount(amountMinor: number): string {
   return String(amountMinor / 100);
 }
 
+function recurringEditStateFromItem(item: RecurringExpense): RecurringEditFormState {
+  return {
+    name: item.name,
+    categoryId: item.category_id,
+    subcategoryId: item.subcategory_id ?? "",
+    kind: item.kind,
+    cadence: item.cadence,
+    expectedAmount: item.expected_amount_minor
+      ? toInputAmount(item.expected_amount_minor)
+      : "",
+    dayOfMonth: item.day_of_month ? String(item.day_of_month) : "",
+    note: item.note ?? "",
+  };
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("home");
   const [telegramId, setTelegramId] = useState<number | null>(null);
@@ -172,6 +211,9 @@ export default function App() {
   const [refundDraftId, setRefundDraftId] = useState<string | null>(null);
   const [refundAmount, setRefundAmount] = useState("");
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null);
+  const [recurringSubmittingId, setRecurringSubmittingId] = useState<string | null>(null);
+  const [recurringForm, setRecurringForm] = useState<RecurringEditFormState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -245,6 +287,12 @@ export default function App() {
   const editingTransaction = editingTransactionId
     ? transactions.find((transaction) => transaction.id === editingTransactionId) ?? null
     : null;
+  const recurringEditCategory =
+    recurringForm && recurringForm.categoryId
+      ? categories.find((category) => category.id === recurringForm.categoryId) ?? null
+      : null;
+  const recurringEditSubcategories =
+    recurringEditCategory?.subcategories.filter((subcategory) => !subcategory.is_archived) ?? [];
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -389,6 +437,105 @@ export default function App() {
           ? recurringError.message
           : "Не удалось создать регулярную трату.",
       );
+    }
+  }
+
+  function startRecurringEdit(item: RecurringExpense) {
+    setError(null);
+    setSuccess(null);
+    setEditingRecurringId(item.id);
+    setRecurringForm(recurringEditStateFromItem(item));
+  }
+
+  function cancelRecurringEdit() {
+    setEditingRecurringId(null);
+    setRecurringForm(null);
+  }
+
+  async function handleRecurringUpdate(item: RecurringExpense) {
+    if (!recurringForm) {
+      return;
+    }
+
+    if (!recurringForm.name.trim()) {
+      setError("Укажи название регулярной траты.");
+      return;
+    }
+
+    if (!recurringForm.categoryId) {
+      setError("Выбери категорию регулярной траты.");
+      return;
+    }
+
+    let expectedAmountMinor: number | null = null;
+    if (recurringForm.expectedAmount.trim()) {
+      expectedAmountMinor = toMinor(recurringForm.expectedAmount);
+      if (!expectedAmountMinor) {
+        setError("Сумма регулярной траты должна быть больше нуля.");
+        return;
+      }
+    }
+
+    let dayOfMonth: number | null = null;
+    if (recurringForm.dayOfMonth.trim()) {
+      dayOfMonth = Number(recurringForm.dayOfMonth);
+      if (!Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
+        setError("День месяца должен быть числом от 1 до 31.");
+        return;
+      }
+    }
+
+    setError(null);
+    setSuccess(null);
+    setRecurringSubmittingId(item.id);
+
+    try {
+      await api.updateRecurringExpense(telegramId, item.id, {
+        name: recurringForm.name.trim(),
+        category_id: recurringForm.categoryId,
+        subcategory_id: recurringForm.subcategoryId || null,
+        kind: recurringForm.kind,
+        cadence: recurringForm.cadence,
+        expected_amount_minor: expectedAmountMinor,
+        day_of_month: dayOfMonth,
+        note: recurringForm.note.trim() ? recurringForm.note.trim() : null,
+      });
+      setSuccess("Регулярная трата обновлена.");
+      cancelRecurringEdit();
+      await reloadData(telegramId);
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Не удалось обновить регулярную трату.",
+      );
+    } finally {
+      setRecurringSubmittingId(null);
+    }
+  }
+
+  async function handleRecurringToggle(item: RecurringExpense) {
+    setError(null);
+    setSuccess(null);
+    setRecurringSubmittingId(item.id);
+
+    try {
+      await api.updateRecurringExpense(telegramId, item.id, {
+        is_active: !item.is_active,
+      });
+      if (editingRecurringId === item.id) {
+        cancelRecurringEdit();
+      }
+      setSuccess(item.is_active ? "Регулярная трата поставлена на паузу." : "Регулярная трата снова активна.");
+      await reloadData(telegramId);
+    } catch (toggleError) {
+      setError(
+        toggleError instanceof Error
+          ? toggleError.message
+          : "Не удалось изменить статус регулярной траты.",
+      );
+    } finally {
+      setRecurringSubmittingId(null);
     }
   }
 
@@ -1076,23 +1223,266 @@ export default function App() {
 
             <SectionCard eyebrow="Обязательная база" title="Регулярные траты">
               <div className="recurring-list">
-                {recurring.map((item) => (
-                  <article key={item.id} className="recurring-item">
-                    <div>
-                      <strong>{item.name}</strong>
-                      <div className="transaction-row__meta">
-                        {item.kind === "fixed" ? "Фиксированная" : "Плавающая"} ·{" "}
-                        {item.cadence}
-                        {item.day_of_month ? ` · ${item.day_of_month} число` : ""}
+                {recurring.map((item) => {
+                  const itemCategory =
+                    categories.find((category) => category.id === item.category_id) ?? null;
+                  const itemSubcategory =
+                    itemCategory?.subcategories.find(
+                      (subcategory) => subcategory.id === item.subcategory_id,
+                    ) ?? null;
+                  const isEditing = editingRecurringId === item.id && recurringForm !== null;
+
+                  return (
+                    <article key={item.id} className="recurring-item">
+                      <div className="recurring-item__main">
+                        <div className="recurring-item__head">
+                          <strong>{item.name}</strong>
+                          {!item.is_active ? (
+                            <span className="recurring-item__status">На паузе</span>
+                          ) : null}
+                        </div>
+                        <div className="transaction-row__meta">
+                          {item.kind === "fixed" ? "Фиксированная" : "Плавающая"} ·{" "}
+                          {friendlyCadence(item.cadence)}
+                          {item.day_of_month ? ` · ${item.day_of_month} число` : ""}
+                        </div>
+                        <div className="transaction-row__meta">
+                          {itemSubcategory?.name || itemCategory?.name || "Без категории"}
+                        </div>
+                        {item.note ? (
+                          <div className="transaction-row__note">{item.note}</div>
+                        ) : null}
+                        {isEditing ? (
+                          <div className="recurring-item__form">
+                            <label className="field">
+                              <span>Название</span>
+                              <input
+                                type="text"
+                                value={recurringForm.name}
+                                onChange={(event) =>
+                                  setRecurringForm((current) =>
+                                    current
+                                      ? { ...current, name: event.target.value }
+                                      : current,
+                                  )
+                                }
+                                disabled={recurringSubmittingId === item.id}
+                              />
+                            </label>
+
+                            <label className="field">
+                              <span>Категория</span>
+                              <select
+                                value={recurringForm.categoryId}
+                                onChange={(event) =>
+                                  setRecurringForm((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          categoryId: event.target.value,
+                                          subcategoryId: "",
+                                        }
+                                      : current,
+                                  )
+                                }
+                                disabled={recurringSubmittingId === item.id}
+                              >
+                                <option value="">Выбери категорию</option>
+                                {availableExpenseCategories.map((category) => (
+                                  <option key={category.id} value={category.id}>
+                                    {category.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            {recurringEditSubcategories.length > 0 ? (
+                              <label className="field">
+                                <span>Подкатегория</span>
+                                <select
+                                  value={recurringForm.subcategoryId}
+                                  onChange={(event) =>
+                                    setRecurringForm((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            subcategoryId: event.target.value,
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  disabled={recurringSubmittingId === item.id}
+                                >
+                                  <option value="">Без подкатегории</option>
+                                  {recurringEditSubcategories.map((subcategory) => (
+                                    <option key={subcategory.id} value={subcategory.id}>
+                                      {subcategory.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            ) : null}
+
+                            <div className="inline-grid">
+                              <label className="field">
+                                <span>Тип</span>
+                                <select
+                                  value={recurringForm.kind}
+                                  onChange={(event) =>
+                                    setRecurringForm((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            kind: event.target.value as "fixed" | "variable",
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  disabled={recurringSubmittingId === item.id}
+                                >
+                                  <option value="fixed">Фиксированная</option>
+                                  <option value="variable">Плавающая</option>
+                                </select>
+                              </label>
+
+                              <label className="field">
+                                <span>Периодичность</span>
+                                <select
+                                  value={recurringForm.cadence}
+                                  onChange={(event) =>
+                                    setRecurringForm((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            cadence: event.target.value as
+                                              | "monthly"
+                                              | "yearly"
+                                              | "custom",
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  disabled={recurringSubmittingId === item.id}
+                                >
+                                  <option value="monthly">Ежемесячно</option>
+                                  <option value="yearly">Ежегодно</option>
+                                  <option value="custom">Своя</option>
+                                </select>
+                              </label>
+                            </div>
+
+                            <div className="inline-grid">
+                              <label className="field">
+                                <span>Ожидаемая сумма</span>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  placeholder="Можно оставить пустым"
+                                  value={recurringForm.expectedAmount}
+                                  onChange={(event) =>
+                                    setRecurringForm((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            expectedAmount: event.target.value,
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  disabled={recurringSubmittingId === item.id}
+                                />
+                              </label>
+
+                              <label className="field">
+                                <span>День месяца</span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="31"
+                                  placeholder="Можно пусто"
+                                  value={recurringForm.dayOfMonth}
+                                  onChange={(event) =>
+                                    setRecurringForm((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            dayOfMonth: event.target.value,
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  disabled={recurringSubmittingId === item.id}
+                                />
+                              </label>
+                            </div>
+
+                            <label className="field">
+                              <span>Комментарий</span>
+                              <textarea
+                                rows={2}
+                                value={recurringForm.note}
+                                onChange={(event) =>
+                                  setRecurringForm((current) =>
+                                    current
+                                      ? { ...current, note: event.target.value }
+                                      : current,
+                                  )
+                                }
+                                disabled={recurringSubmittingId === item.id}
+                              />
+                            </label>
+
+                            <div className="recurring-item__form-actions">
+                              <button
+                                type="button"
+                                className="transaction-row__action"
+                                disabled={recurringSubmittingId === item.id}
+                                onClick={() => void handleRecurringUpdate(item)}
+                              >
+                                {recurringSubmittingId === item.id
+                                  ? "Сохраняю…"
+                                  : "Сохранить"}
+                              </button>
+                              <button
+                                type="button"
+                                className="transaction-row__action transaction-row__action--muted"
+                                disabled={recurringSubmittingId === item.id}
+                                onClick={cancelRecurringEdit}
+                              >
+                                Отмена
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
-                    </div>
-                    <span>
-                      {item.expected_amount_minor
-                        ? formatMinor(item.expected_amount_minor)
-                        : "Без суммы"}
-                    </span>
-                  </article>
-                ))}
+                      <div className="recurring-item__side">
+                        <span>
+                          {item.expected_amount_minor
+                            ? formatMinor(item.expected_amount_minor)
+                            : "Без суммы"}
+                        </span>
+                        <div className="recurring-item__actions">
+                          <button
+                            type="button"
+                            className="transaction-row__action"
+                            disabled={recurringSubmittingId === item.id}
+                            onClick={() => startRecurringEdit(item)}
+                          >
+                            Редактировать
+                          </button>
+                          <button
+                            type="button"
+                            className="transaction-row__action transaction-row__action--muted"
+                            disabled={recurringSubmittingId === item.id}
+                            onClick={() => void handleRecurringToggle(item)}
+                          >
+                            {item.is_active ? "Пауза" : "Возобновить"}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
                 {recurring.length === 0 ? (
                   <div className="empty-state">
                     Регулярные траты пока не заведены. Их можно добавить на вкладке

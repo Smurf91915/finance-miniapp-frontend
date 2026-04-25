@@ -432,6 +432,54 @@ button {
   opacity: 0.65;
 }
 
+.recurring-item__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.recurring-item__side {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  min-width: fit-content;
+}
+
+.recurring-item__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recurring-item__status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(89, 58, 28, 0.08);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.recurring-item__actions,
+.recurring-item__form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recurring-item__actions {
+  justify-content: flex-end;
+}
+
+.recurring-item__form {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .goal-tile {
   padding: 16px;
   border-radius: 20px;
@@ -549,6 +597,15 @@ button {
   .transaction-row__actions {
     width: 100%;
     justify-items: start;
+  }
+
+  .recurring-item__side {
+    width: 100%;
+    justify-items: start;
+  }
+
+  .recurring-item__actions {
+    justify-content: flex-start;
   }
 
   .bottom-nav {
