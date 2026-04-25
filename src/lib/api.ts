@@ -4,6 +4,7 @@ import {
   Goal,
   GoalHistoryItem,
   GoalAnalytics,
+  ParsedTransaction,
   RecurringExpense,
   SpendingAnalytics,
   Subcategory,
@@ -73,6 +74,8 @@ export const api = {
     request<Dashboard>("GET", "/dashboard", telegramId),
   listTransactions: (telegramId: number | null) =>
     request<Transaction[]>("GET", "/transactions?limit=50", telegramId),
+  parseTransaction: (telegramId: number | null, text: string) =>
+    request<ParsedTransaction>("POST", "/transactions/parse", telegramId, { text }),
   listCategories: (telegramId: number | null) =>
     request<Category[]>("GET", "/categories", telegramId),
   createCategory: (

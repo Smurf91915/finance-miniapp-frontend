@@ -42,6 +42,17 @@ export interface GoalHistoryItem {
   note: string | null;
 }
 
+export interface ParsedTransaction {
+  type: "income" | "expense" | "investment" | "goal_allocation";
+  amount_minor: number;
+  currency: string;
+  category_id: string | null;
+  subcategory_id: string | null;
+  goal_id: string | null;
+  note: string | null;
+  confidence: number;
+}
+
 export interface Transaction {
   id: string;
   type: TransactionType;

@@ -11,6 +11,7 @@ import type {
   Goal,
   GoalAnalytics,
   GoalHistoryItem,
+  ParsedTransaction,
   RecurringExpense,
   SpendingAnalytics,
   Transaction,
@@ -158,6 +159,16 @@ function friendlyGoalKind(kind: string): string {
   }
 }
 
+function parsedTransactionCanSave(parsed: ParsedTransaction): boolean {
+  if (parsed.type === "income") {
+    return true;
+  }
+  if (parsed.type === "goal_allocation") {
+    return Boolean(parsed.goal_id);
+  }
+  return Boolean(parsed.category_id);
+}
+
 function transactionLabel(transaction: Transaction): string {
   return (
     transaction.subcategory_name ||
@@ -272,6 +283,11 @@ export default function App() {
   const [goalHistoryId, setGoalHistoryId] = useState<string | null>(null);
   const [goalHistoryItems, setGoalHistoryItems] = useState<GoalHistoryItem[]>([]);
   const [goalHistoryLoading, setGoalHistoryLoading] = useState(false);
+  const [quickEntryText, setQuickEntryText] = useState("");
+  const [quickEntryReserveAmount, setQuickEntryReserveAmount] = useState("");
+  const [parsedTransaction, setParsedTransaction] = useState<ParsedTransaction | null>(null);
+  const [parsingTransaction, setParsingTransaction] = useState(false);
+  const [quickEntrySubmitting, setQuickEntrySubmitting] = useState(false);
   const [categoryForm, setCategoryForm] =
     useState<CategoryCreateFormState>(defaultCategoryFormState);
   const [subcategoryForm, setSubcategoryForm] =
@@ -524,6 +540,137 @@ export default function App() {
           ? recurringError.message
           : "Не удалось создать регулярную трату.",
       );
+    }
+  }
+
+  function applyParsedTransactionToForm(parsed: ParsedTransaction) {
+    setEditingTransactionId(null);
+    setError(null);
+    setSuccess(null);
+    setForm({
+      ...defaultFormState,
+      mode: parsed.type,
+      amount: toInputAmount(parsed.amount_minor),
+      note: parsed.note ?? quickEntryText,
+      categoryId: parsed.category_id ?? "",
+      subcategoryId: parsed.subcategory_id ?? "",
+      goalId: parsed.goal_id ?? goals[0]?.id ?? "",
+      reserveAmount: quickEntryReserveAmount,
+    });
+  }
+
+  async function handleQuickParse() {
+    if (!quickEntryText.trim()) {
+      setError("Напиши текст операции, например `кофе 320`.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setParsingTransaction(true);
+
+    try {
+      const parsed = await api.parseTransaction(telegramId, quickEntryText);
+      setParsedTransaction(parsed);
+      if (parsed.type !== "income") {
+        setQuickEntryReserveAmount("");
+      }
+      setSuccess("Текст разобран. Проверь, что все совпало.");
+    } catch (parseError) {
+      setParsedTransaction(null);
+      setError(
+        parseError instanceof Error
+          ? parseError.message
+          : "Не удалось разобрать текст операции.",
+      );
+    } finally {
+      setParsingTransaction(false);
+    }
+  }
+
+  async function handleQuickCreate() {
+    if (!parsedTransaction) {
+      return;
+    }
+
+    if (!parsedTransactionCanSave(parsedTransaction)) {
+      setError("Нужна ручная проверка: приложение не смогло полностью определить цель или категорию.");
+      return;
+    }
+
+    let reserveAmountMinor: number | null = null;
+    if (parsedTransaction.type === "income" && quickEntryReserveAmount.trim()) {
+      reserveAmountMinor = toMinor(quickEntryReserveAmount);
+      if (!reserveAmountMinor) {
+        setError("Сумма в запас должна быть больше нуля.");
+        return;
+      }
+    }
+
+    setError(null);
+    setSuccess(null);
+    setQuickEntrySubmitting(true);
+
+    try {
+      if (parsedTransaction.type === "income") {
+        await api.createIncome(telegramId, {
+          amount_minor: parsedTransaction.amount_minor,
+          currency: parsedTransaction.currency,
+          occurred_at: new Date().toISOString(),
+          note: parsedTransaction.note ?? quickEntryText,
+          reserve_amount_minor: reserveAmountMinor,
+          source: "mini_app",
+        });
+      }
+
+      if (parsedTransaction.type === "expense" && parsedTransaction.category_id) {
+        await api.createExpense(telegramId, {
+          amount_minor: parsedTransaction.amount_minor,
+          currency: parsedTransaction.currency,
+          occurred_at: new Date().toISOString(),
+          category_id: parsedTransaction.category_id,
+          subcategory_id: parsedTransaction.subcategory_id,
+          note: parsedTransaction.note ?? quickEntryText,
+          source: "mini_app",
+        });
+      }
+
+      if (parsedTransaction.type === "investment" && parsedTransaction.category_id) {
+        await api.createInvestment(telegramId, {
+          amount_minor: parsedTransaction.amount_minor,
+          currency: parsedTransaction.currency,
+          occurred_at: new Date().toISOString(),
+          category_id: parsedTransaction.category_id,
+          subcategory_id: parsedTransaction.subcategory_id,
+          note: parsedTransaction.note ?? quickEntryText,
+          source: "mini_app",
+        });
+      }
+
+      if (parsedTransaction.type === "goal_allocation" && parsedTransaction.goal_id) {
+        await api.allocateGoal(telegramId, parsedTransaction.goal_id, {
+          amount_minor: parsedTransaction.amount_minor,
+          currency: parsedTransaction.currency,
+          occurred_at: new Date().toISOString(),
+          note: parsedTransaction.note ?? quickEntryText,
+          source: "mini_app",
+        });
+      }
+
+      setSuccess("Операция записана по текстовому вводу.");
+      setQuickEntryText("");
+      setQuickEntryReserveAmount("");
+      setParsedTransaction(null);
+      await reloadData(telegramId);
+      setActiveTab("home");
+    } catch (createError) {
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : "Не удалось записать операцию из текстового ввода.",
+      );
+    } finally {
+      setQuickEntrySubmitting(false);
     }
   }
 
@@ -1141,6 +1288,110 @@ export default function App() {
 
         {!loading && activeTab === "add" ? (
           <div className="stack">
+            {!editingTransaction ? (
+              <SectionCard eyebrow="Быстрый ввод" title="Напиши операцию как сообщение">
+                <div className="quick-entry">
+                  <label className="field">
+                    <span>Текст операции</span>
+                    <textarea
+                      rows={2}
+                      placeholder="Например: кофе 320, зарплата 120000, вклад 15000"
+                      value={quickEntryText}
+                      onChange={(event) => setQuickEntryText(event.target.value)}
+                      disabled={parsingTransaction || quickEntrySubmitting}
+                    />
+                  </label>
+
+                  <div className="quick-entry__actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={parsingTransaction || quickEntrySubmitting}
+                      onClick={() => void handleQuickParse()}
+                    >
+                      {parsingTransaction ? "Разбираю…" : "Разобрать текст"}
+                    </button>
+                  </div>
+
+                  {parsedTransaction ? (
+                    <div className="quick-entry__preview">
+                      <div className="quick-entry__meta">
+                        <strong>{friendlyType(parsedTransaction.type)}</strong>
+                        <span>
+                          Уверенность: {Math.round(parsedTransaction.confidence * 100)}%
+                        </span>
+                      </div>
+                      <div className="quick-entry__summary">
+                        <div>Сумма: {formatMinor(parsedTransaction.amount_minor)}</div>
+                        <div>
+                          Категория:{" "}
+                          {parsedTransaction.category_id
+                            ? categories.find(
+                                (category) => category.id === parsedTransaction.category_id,
+                              )?.name ?? "Определена"
+                            : "Не определена"}
+                        </div>
+                        <div>
+                          Цель:{" "}
+                          {parsedTransaction.goal_id
+                            ? goals.find((goal) => goal.id === parsedTransaction.goal_id)?.name ??
+                              "Определена"
+                            : "Не определена"}
+                        </div>
+                        <div>
+                          Комментарий: {parsedTransaction.note || quickEntryText}
+                        </div>
+                      </div>
+
+                      {parsedTransaction.type === "income" ? (
+                        <label className="field">
+                          <span>Сколько сразу отправить в запас?</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            placeholder="Можно оставить пустым"
+                            value={quickEntryReserveAmount}
+                            onChange={(event) =>
+                              setQuickEntryReserveAmount(event.target.value)
+                            }
+                            disabled={quickEntrySubmitting}
+                          />
+                        </label>
+                      ) : null}
+
+                      {!parsedTransactionCanSave(parsedTransaction) ? (
+                        <div className="empty-state">
+                          Не все поля удалось определить автоматически. Можно перенести в форму и
+                          доправить вручную.
+                        </div>
+                      ) : null}
+
+                      <div className="quick-entry__actions">
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={
+                            quickEntrySubmitting || !parsedTransactionCanSave(parsedTransaction)
+                          }
+                          onClick={() => void handleQuickCreate()}
+                        >
+                          {quickEntrySubmitting ? "Записываю…" : "Записать сразу"}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          disabled={quickEntrySubmitting}
+                          onClick={() => applyParsedTransactionToForm(parsedTransaction)}
+                        >
+                          Перенести в форму
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </SectionCard>
+            ) : null}
+
             <SectionCard
               eyebrow={editingTransaction ? "Редактирование" : "Новая запись"}
               title={

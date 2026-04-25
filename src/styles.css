@@ -589,6 +589,35 @@ button {
   font-weight: 700;
 }
 
+.quick-entry,
+.quick-entry__summary {
+  display: grid;
+  gap: 12px;
+}
+
+.quick-entry__preview {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 250, 241, 0.84);
+}
+
+.quick-entry__meta,
+.quick-entry__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.quick-entry__meta span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .goal-progress__head,
 .category-bar__head {
   display: flex;
@@ -705,7 +734,9 @@ button {
 
   .category-manager__head,
   .category-manager__subitem,
-  .category-manager__actions {
+  .category-manager__actions,
+  .quick-entry__meta,
+  .quick-entry__actions {
     flex-direction: column;
     align-items: flex-start;
   }
