@@ -33,6 +33,15 @@ export interface Goal {
   balance_minor: number;
 }
 
+export interface GoalHistoryItem {
+  id: string;
+  type: string;
+  amount_minor: number;
+  currency: string;
+  occurred_at: string;
+  note: string | null;
+}
+
 export interface Transaction {
   id: string;
   type: TransactionType;
