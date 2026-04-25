@@ -82,6 +82,78 @@ function friendlyType(type: TransactionType): string {
   }
 }
 
+function transactionLabel(transaction: Transaction): string {
+  return (
+    transaction.subcategory_name ||
+    transaction.category_name ||
+    transaction.goal_name ||
+    friendlyType(transaction.type)
+  );
+}
+
+function refundableRemainingMinor(
+  transaction: Transaction,
+  allTransactions: Transaction[],
+): number {
+  if (transaction.type !== "expense" && transaction.type !== "investment") {
+    return 0;
+  }
+
+  const refundedMinor = allTransactions
+    .filter(
+      (item) =>
+        item.type === "refund" && item.linked_transaction_id === transaction.id,
+    )
+    .reduce((sum, item) => sum + item.amount_minor, 0);
+
+  return Math.max(transaction.amount_minor - refundedMinor, 0);
+}
+
+function hasLinkedTransactions(
+  transaction: Transaction,
+  allTransactions: Transaction[],
+): boolean {
+  return allTransactions.some(
+    (item) => item.linked_transaction_id === transaction.id,
+  );
+}
+
+function editableModeForTransaction(transaction: Transaction): AddMode | null {
+  switch (transaction.type) {
+    case "expense":
+      return "expense";
+    case "income":
+      return "income";
+    case "investment":
+      return "investment";
+    case "goal_allocation":
+      return "goal_allocation";
+    default:
+      return null;
+  }
+}
+
+function canEditTransaction(
+  transaction: Transaction,
+  allTransactions: Transaction[],
+): boolean {
+  return (
+    editableModeForTransaction(transaction) !== null &&
+    !hasLinkedTransactions(transaction, allTransactions)
+  );
+}
+
+function canDeleteTransaction(
+  transaction: Transaction,
+  allTransactions: Transaction[],
+): boolean {
+  return !hasLinkedTransactions(transaction, allTransactions);
+}
+
+function toInputAmount(amountMinor: number): string {
+  return String(amountMinor / 100);
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("home");
   const [telegramId, setTelegramId] = useState<number | null>(null);
@@ -95,6 +167,11 @@ export default function App() {
   const [form, setForm] = useState<AddFormState>(defaultFormState);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [refundingId, setRefundingId] = useState<string | null>(null);
+  const [refundDraftId, setRefundDraftId] = useState<string | null>(null);
+  const [refundAmount, setRefundAmount] = useState("");
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -165,6 +242,9 @@ export default function App() {
     categories.find((category) => category.id === form.categoryId) ?? null;
   const selectedSubcategories =
     selectedCategory?.subcategories.filter((subcategory) => !subcategory.is_archived) ?? [];
+  const editingTransaction = editingTransactionId
+    ? transactions.find((transaction) => transaction.id === editingTransactionId) ?? null
+    : null;
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -178,10 +258,36 @@ export default function App() {
       setSubmitting(false);
       return;
     }
-    const occurredAt = new Date().toISOString();
+    const occurredAt = editingTransaction?.occurred_at ?? new Date().toISOString();
 
     try {
-      if (form.mode === "expense") {
+      if (editingTransaction) {
+        if (form.mode === "expense" || form.mode === "investment") {
+          if (!form.categoryId) {
+            throw new Error("Выбери категорию.");
+          }
+        }
+
+        if (form.mode === "goal_allocation" && !form.goalId) {
+          throw new Error("Выбери цель.");
+        }
+
+        await api.updateTransaction(telegramId, editingTransaction.id, {
+          amount_minor: amountMinor,
+          occurred_at: occurredAt,
+          note: form.note,
+          category_id:
+            form.mode === "expense" || form.mode === "investment"
+              ? form.categoryId
+              : undefined,
+          subcategory_id:
+            form.mode === "expense" || form.mode === "investment"
+              ? form.subcategoryId || null
+              : undefined,
+          goal_id: form.mode === "goal_allocation" ? form.goalId : undefined,
+        });
+        setSuccess("Операция обновлена.");
+      } else if (form.mode === "expense") {
         if (!form.categoryId) {
           throw new Error("Выбери категорию расхода.");
         }
@@ -197,7 +303,7 @@ export default function App() {
         setSuccess("Расход записан.");
       }
 
-      if (form.mode === "income") {
+      if (!editingTransaction && form.mode === "income") {
         const reserveMinor = form.reserveAmount ? toMinor(form.reserveAmount) : null;
         await api.createIncome(telegramId, {
           amount_minor: amountMinor,
@@ -210,7 +316,7 @@ export default function App() {
         setSuccess("Доход записан.");
       }
 
-      if (form.mode === "investment") {
+      if (!editingTransaction && form.mode === "investment") {
         if (!form.categoryId) {
           throw new Error("Выбери инвестиционную категорию.");
         }
@@ -226,7 +332,7 @@ export default function App() {
         setSuccess("Инвестиция записана.");
       }
 
-      if (form.mode === "goal_allocation") {
+      if (!editingTransaction && form.mode === "goal_allocation") {
         if (!form.goalId) {
           throw new Error("Выбери цель.");
         }
@@ -244,6 +350,7 @@ export default function App() {
         ...defaultFormState,
         goalId: goals[0]?.id ?? "",
       });
+      setEditingTransactionId(null);
       await reloadData(telegramId);
       setActiveTab("home");
     } catch (submitError) {
@@ -282,6 +389,143 @@ export default function App() {
           ? recurringError.message
           : "Не удалось создать регулярную трату.",
       );
+    }
+  }
+
+  function startRefund(transaction: Transaction) {
+    const remainingMinor = refundableRemainingMinor(transaction, transactions);
+    if (!remainingMinor) {
+      setError("Для этой операции больше нечего возвращать.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setRefundDraftId(transaction.id);
+    setRefundAmount(toInputAmount(remainingMinor));
+  }
+
+  function cancelRefund() {
+    setRefundDraftId(null);
+    setRefundAmount("");
+  }
+
+  async function handleRefund(transaction: Transaction) {
+    const remainingMinor = refundableRemainingMinor(transaction, transactions);
+    if (!remainingMinor) {
+      setError("Для этой операции больше нечего возвращать.");
+      return;
+    }
+
+    const amountMinor = toMinor(refundAmount);
+    if (!amountMinor) {
+      setError("Укажи сумму возврата больше нуля.");
+      return;
+    }
+
+    if (amountMinor > remainingMinor) {
+      setError(
+        `Можно вернуть не больше ${formatMinor(remainingMinor)} по этой операции.`,
+      );
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setRefundingId(transaction.id);
+
+    try {
+      await api.createRefund(telegramId, transaction.id, {
+        amount_minor: amountMinor,
+        currency: transaction.currency,
+        occurred_at: new Date().toISOString(),
+        note: transaction.note
+          ? `Возврат по операции: ${transaction.note}`
+          : `Возврат по операции: ${transactionLabel(transaction)}`,
+        source: "mini_app",
+      });
+      setSuccess(`Возврат ${formatMinor(amountMinor)} записан.`);
+      cancelRefund();
+      await reloadData(telegramId);
+    } catch (refundError) {
+      setError(
+        refundError instanceof Error
+          ? refundError.message
+          : "Не удалось записать возврат.",
+      );
+    } finally {
+      setRefundingId(null);
+    }
+  }
+
+  function handleEdit(transaction: Transaction) {
+    const mode = editableModeForTransaction(transaction);
+    if (!mode) {
+      setError("Эту операцию пока нельзя редактировать из интерфейса.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    cancelRefund();
+    setEditingTransactionId(transaction.id);
+    setForm({
+      ...defaultFormState,
+      mode,
+      amount: toInputAmount(transaction.amount_minor),
+      note: transaction.note ?? "",
+      categoryId: transaction.category_id ?? "",
+      subcategoryId: transaction.subcategory_id ?? "",
+      goalId: transaction.goal_id ?? goals[0]?.id ?? "",
+    });
+    setActiveTab("add");
+  }
+
+  function cancelEditing() {
+    setEditingTransactionId(null);
+    setForm({
+      ...defaultFormState,
+      goalId: goals[0]?.id ?? "",
+    });
+  }
+
+  async function handleDelete(transaction: Transaction) {
+    if (!canDeleteTransaction(transaction, transactions)) {
+      setError("Сначала убери связанные операции, потом удаляй исходную.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Удалить операцию «${transactionLabel(transaction)}» на ${formatMinor(
+        transaction.amount_minor,
+      )}?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setDeletingId(transaction.id);
+
+    try {
+      await api.deleteTransaction(telegramId, transaction.id);
+      if (editingTransactionId === transaction.id) {
+        cancelEditing();
+      }
+      if (refundDraftId === transaction.id) {
+        cancelRefund();
+      }
+      setSuccess("Операция удалена.");
+      await reloadData(telegramId);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Не удалось удалить операцию.",
+      );
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -344,6 +588,7 @@ export default function App() {
             >
               <div className="action-grid">
                 <button type="button" className="action-pill" onClick={() => {
+                  setEditingTransactionId(null);
                   setForm((current) => ({
                     ...defaultFormState,
                     mode: "expense",
@@ -354,6 +599,7 @@ export default function App() {
                   Расход
                 </button>
                 <button type="button" className="action-pill" onClick={() => {
+                  setEditingTransactionId(null);
                   setForm((current) => ({
                     ...defaultFormState,
                     mode: "income",
@@ -364,6 +610,7 @@ export default function App() {
                   Доход
                 </button>
                 <button type="button" className="action-pill" onClick={() => {
+                  setEditingTransactionId(null);
                   setForm((current) => ({
                     ...defaultFormState,
                     mode: "goal_allocation",
@@ -374,6 +621,7 @@ export default function App() {
                   Вклад
                 </button>
                 <button type="button" className="action-pill" onClick={() => {
+                  setEditingTransactionId(null);
                   setForm((current) => ({
                     ...defaultFormState,
                     mode: "investment",
@@ -392,10 +640,7 @@ export default function App() {
                   <article className="transaction-row" key={transaction.id}>
                     <div>
                       <div className="transaction-row__title">
-                        {transaction.subcategory_name ||
-                          transaction.category_name ||
-                          transaction.goal_name ||
-                          friendlyType(transaction.type)}
+                        {transactionLabel(transaction)}
                       </div>
                       <div className="transaction-row__meta">
                         {new Date(transaction.occurred_at).toLocaleDateString("ru-RU")} ·{" "}
@@ -423,31 +668,56 @@ export default function App() {
 
         {!loading && activeTab === "add" ? (
           <div className="stack">
-            <SectionCard eyebrow="Новая запись" title="Добавить движение денег">
+            <SectionCard
+              eyebrow={editingTransaction ? "Редактирование" : "Новая запись"}
+              title={
+                editingTransaction
+                  ? "Исправить операцию"
+                  : "Добавить движение денег"
+              }
+              action={
+                editingTransaction ? (
+                  <button
+                    type="button"
+                    className="section-card__action"
+                    onClick={cancelEditing}
+                  >
+                    Отменить
+                  </button>
+                ) : null
+              }
+            >
               <form className="finance-form" onSubmit={handleSubmit}>
-                <div className="mode-switch">
-                  {[
-                    ["expense", "Расход"],
-                    ["income", "Доход"],
-                    ["goal_allocation", "Накопление"],
-                    ["investment", "Инвестиция"],
-                  ].map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className={`mode-switch__item ${form.mode === value ? "is-active" : ""}`}
-                      onClick={() =>
-                        setForm((current) => ({
-                          ...defaultFormState,
-                          mode: value as AddMode,
-                          goalId: current.goalId || goals[0]?.id || "",
-                        }))
-                      }
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+                {editingTransaction ? (
+                  <div className="mode-static">
+                    Режим: {friendlyType(editingTransaction.type)}
+                  </div>
+                ) : (
+                  <div className="mode-switch">
+                    {[
+                      ["expense", "Расход"],
+                      ["income", "Доход"],
+                      ["goal_allocation", "Накопление"],
+                      ["investment", "Инвестиция"],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`mode-switch__item ${form.mode === value ? "is-active" : ""}`}
+                        onClick={() => {
+                          setEditingTransactionId(null);
+                          setForm((current) => ({
+                            ...defaultFormState,
+                            mode: value as AddMode,
+                            goalId: current.goalId || goals[0]?.id || "",
+                          }));
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 <label className="field">
                   <span>Сумма</span>
@@ -559,12 +829,16 @@ export default function App() {
                 </label>
 
                 <button className="primary-button" type="submit" disabled={submitting}>
-                  {submitting ? "Сохраняю…" : "Сохранить запись"}
+                  {submitting
+                    ? "Сохраняю…"
+                    : editingTransaction
+                      ? "Сохранить изменения"
+                      : "Сохранить запись"}
                 </button>
               </form>
             </SectionCard>
 
-            {form.mode === "expense" ? (
+            {form.mode === "expense" && !editingTransaction ? (
               <SectionCard eyebrow="Регулярные платежи" title="Сделать эту трату регулярной">
                 <div className="finance-form">
                   <label className="field">
@@ -654,14 +928,18 @@ export default function App() {
           <div className="stack">
             <SectionCard eyebrow="Журнал" title="История операций">
               <div className="transaction-list">
-                {transactions.map((transaction) => (
+                {transactions.map((transaction) => {
+                  const remainingMinor = refundableRemainingMinor(
+                    transaction,
+                    transactions,
+                  );
+                  const isRefundDraftOpen = refundDraftId === transaction.id;
+
+                  return (
                   <article className="transaction-row" key={transaction.id}>
-                    <div>
+                    <div className="transaction-row__main">
                       <div className="transaction-row__title">
-                        {transaction.subcategory_name ||
-                          transaction.category_name ||
-                          transaction.goal_name ||
-                          friendlyType(transaction.type)}
+                        {transactionLabel(transaction)}
                       </div>
                       <div className="transaction-row__meta">
                         {new Date(transaction.occurred_at).toLocaleString("ru-RU")} ·{" "}
@@ -670,10 +948,84 @@ export default function App() {
                       {transaction.note ? (
                         <div className="transaction-row__note">{transaction.note}</div>
                       ) : null}
+                      {isRefundDraftOpen ? (
+                        <div className="transaction-row__refund-form">
+                          <label className="field">
+                            <span>
+                              Сумма возврата, максимум {formatMinor(remainingMinor)}
+                            </span>
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              min="0"
+                              step="0.01"
+                              value={refundAmount}
+                              onChange={(event) => setRefundAmount(event.target.value)}
+                              disabled={refundingId === transaction.id}
+                            />
+                          </label>
+                          <div className="transaction-row__refund-actions">
+                            <button
+                              type="button"
+                              className="transaction-row__action"
+                              disabled={refundingId === transaction.id}
+                              onClick={() => void handleRefund(transaction)}
+                            >
+                              {refundingId === transaction.id
+                                ? "Оформляю…"
+                                : "Подтвердить возврат"}
+                            </button>
+                            <button
+                              type="button"
+                              className="transaction-row__action transaction-row__action--muted"
+                              disabled={refundingId === transaction.id}
+                              onClick={cancelRefund}
+                            >
+                              Отмена
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                    <strong>{formatMinor(transaction.amount_minor)}</strong>
+                    <div className="transaction-row__side">
+                      <strong>{formatMinor(transaction.amount_minor)}</strong>
+                      <div className="transaction-row__actions">
+                        {canEditTransaction(transaction, transactions) ? (
+                          <button
+                            type="button"
+                            className="transaction-row__action"
+                            onClick={() => handleEdit(transaction)}
+                          >
+                            Редактировать
+                          </button>
+                        ) : null}
+                        {remainingMinor > 0 ? (
+                          <button
+                            type="button"
+                            className="transaction-row__action"
+                            disabled={refundingId === transaction.id}
+                            onClick={() => startRefund(transaction)}
+                          >
+                            {isRefundDraftOpen
+                              ? "Изменить возврат"
+                              : `Вернуть до ${formatMinor(remainingMinor)}`}
+                          </button>
+                        ) : null}
+                        {canDeleteTransaction(transaction, transactions) ? (
+                          <button
+                            type="button"
+                            className="transaction-row__action transaction-row__action--danger"
+                            disabled={deletingId === transaction.id}
+                            onClick={() => void handleDelete(transaction)}
+                          >
+                            {deletingId === transaction.id ? "Удаляю…" : "Удалить"}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
             </SectionCard>
           </div>

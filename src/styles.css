@@ -231,6 +231,14 @@ button {
   margin-bottom: 18px;
 }
 
+.section-card__action {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(207, 177, 146, 0.24);
+  color: var(--text);
+}
+
 .section-card__title {
   margin: 0;
   font-size: 1.2rem;
@@ -283,6 +291,13 @@ button {
   background: #fff7ea;
   color: var(--text);
   box-shadow: 0 8px 24px rgba(90, 52, 18, 0.12);
+}
+
+.mode-static {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(207, 177, 146, 0.18);
+  color: var(--muted);
 }
 
 .field {
@@ -353,6 +368,24 @@ button {
   font-weight: 700;
 }
 
+.transaction-row__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.transaction-row__side {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  min-width: fit-content;
+}
+
+.transaction-row__actions {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
 .transaction-row__meta,
 .transaction-row__note,
 .goal-tile small {
@@ -361,6 +394,42 @@ button {
 
 .transaction-row__note {
   margin-top: 6px;
+}
+
+.transaction-row__refund-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.transaction-row__refund-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.transaction-row__action {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(63, 125, 99, 0.12);
+  color: var(--success);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.transaction-row__action--danger {
+  background: rgba(163, 70, 61, 0.12);
+  color: var(--danger);
+}
+
+.transaction-row__action--muted {
+  background: rgba(89, 58, 28, 0.08);
+  color: var(--muted);
+}
+
+.transaction-row__action:disabled {
+  opacity: 0.65;
 }
 
 .goal-tile {
@@ -469,6 +538,17 @@ button {
   .goal-grid,
   .inline-grid {
     grid-template-columns: 1fr;
+  }
+
+  .transaction-row,
+  .recurring-item {
+    flex-direction: column;
+  }
+
+  .transaction-row__side,
+  .transaction-row__actions {
+    width: 100%;
+    justify-items: start;
   }
 
   .bottom-nav {

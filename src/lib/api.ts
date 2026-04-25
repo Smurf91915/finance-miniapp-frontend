@@ -14,6 +14,24 @@ const API_BASE_URL =
 
 type ApiMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
+async function extractErrorMessage(response: Response): Promise<string> {
+  const detail = await response.text();
+  if (!detail) {
+    return `Request failed with status ${response.status}`;
+  }
+
+  try {
+    const parsed = JSON.parse(detail) as { detail?: string };
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      return parsed.detail;
+    }
+  } catch {
+    // Fall through to raw response text.
+  }
+
+  return detail;
+}
+
 async function request<T>(
   method: ApiMethod,
   path: string,
@@ -38,8 +56,7 @@ async function request<T>(
   });
 
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Request failed with status ${response.status}`);
+    throw new Error(await extractErrorMessage(response));
   }
 
   if (response.status === 204) {
@@ -101,6 +118,43 @@ export const api = {
     },
   ) =>
     request<Transaction>("POST", "/transactions/investment", telegramId, payload),
+  createRefund: (
+    telegramId: number | null,
+    transactionId: string,
+    payload: {
+      amount_minor: number;
+      currency: string;
+      occurred_at: string;
+      note?: string;
+      source: string;
+    },
+    ) =>
+    request<Transaction>(
+      "POST",
+      `/transactions/${transactionId}/refund`,
+      telegramId,
+      payload,
+    ),
+  updateTransaction: (
+    telegramId: number | null,
+    transactionId: string,
+    payload: {
+      amount_minor?: number;
+      occurred_at?: string;
+      note?: string;
+      category_id?: string | null;
+      subcategory_id?: string | null;
+      goal_id?: string | null;
+    },
+  ) =>
+    request<Transaction>(
+      "PATCH",
+      `/transactions/${transactionId}`,
+      telegramId,
+      payload,
+    ),
+  deleteTransaction: (telegramId: number | null, transactionId: string) =>
+    request<{ ok: boolean }>("DELETE", `/transactions/${transactionId}`, telegramId),
   allocateGoal: (
     telegramId: number | null,
     goalId: string,
