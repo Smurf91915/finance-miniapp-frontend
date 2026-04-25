@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Frontend Readme
+    url: https://github.com/Smurf91915/finance-miniapp-frontend/blob/main/README.md
+    about: Check setup and deployment notes before opening an issue.
