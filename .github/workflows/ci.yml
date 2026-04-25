@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Smoke test production server
+        run: |
+          test -f dist/index.html
+
+          PORT=3000 npm run start &
+          frontend_pid=$!
+          trap "kill $frontend_pid" EXIT
+
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:3000/health >/tmp/frontend-health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          curl -fsS http://127.0.0.1:3000/health >/tmp/frontend-health.json
+          curl -fsSI http://127.0.0.1:3000/ >/tmp/frontend-headers.txt
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          health = json.loads(Path("/tmp/frontend-health.json").read_text())
+          headers = Path("/tmp/frontend-headers.txt").read_text()
+
+          assert health == {"status": "ok"}
+          assert "200" in headers.splitlines()[0]
+          PY
