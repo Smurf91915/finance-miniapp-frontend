@@ -623,6 +623,17 @@ button {
   font-size: 0.9rem;
 }
 
+.history-filters {
+  display: grid;
+  gap: 12px;
+}
+
+.history-filters__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .goal-progress__head,
 .category-bar__head {
   display: flex;
@@ -741,7 +752,8 @@ button {
   .category-manager__subitem,
   .category-manager__actions,
   .quick-entry__meta,
-  .quick-entry__actions {
+  .quick-entry__actions,
+  .history-filters__actions {
     flex-direction: column;
     align-items: flex-start;
   }
