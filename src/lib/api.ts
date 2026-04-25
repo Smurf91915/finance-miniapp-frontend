@@ -6,6 +6,7 @@ import {
   GoalAnalytics,
   RecurringExpense,
   SpendingAnalytics,
+  Subcategory,
   Transaction,
 } from "./types";
 import { getTelegramInitData } from "./telegram";
@@ -74,6 +75,46 @@ export const api = {
     request<Transaction[]>("GET", "/transactions?limit=50", telegramId),
   listCategories: (telegramId: number | null) =>
     request<Category[]>("GET", "/categories", telegramId),
+  createCategory: (
+    telegramId: number | null,
+    payload: {
+      kind: string;
+      name: string;
+      sort_order?: number;
+    },
+  ) => request<Category>("POST", "/categories", telegramId, payload),
+  updateCategory: (
+    telegramId: number | null,
+    categoryId: string,
+    payload: {
+      name?: string;
+      is_archived?: boolean;
+      sort_order?: number;
+    },
+  ) => request<Category>("PATCH", `/categories/${categoryId}`, telegramId, payload),
+  createSubcategory: (
+    telegramId: number | null,
+    payload: {
+      category_id: string;
+      name: string;
+      sort_order?: number;
+    },
+  ) => request<Subcategory>("POST", "/categories/subcategories", telegramId, payload),
+  updateSubcategory: (
+    telegramId: number | null,
+    subcategoryId: string,
+    payload: {
+      name?: string;
+      is_archived?: boolean;
+      sort_order?: number;
+    },
+  ) =>
+    request<Subcategory>(
+      "PATCH",
+      `/categories/subcategories/${subcategoryId}`,
+      telegramId,
+      payload,
+    ),
   listGoals: (telegramId: number | null) =>
     request<Goal[]>("GET", "/goals", telegramId),
   createGoal: (
