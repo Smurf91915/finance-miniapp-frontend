@@ -191,4 +191,25 @@ export const api = {
       telegramId,
       payload,
     ),
+  updateRecurringExpense: (
+    telegramId: number | null,
+    recurringId: string,
+    payload: {
+      name?: string;
+      category_id?: string | null;
+      subcategory_id?: string | null;
+      kind?: string;
+      cadence?: string;
+      expected_amount_minor?: number | null;
+      day_of_month?: number | null;
+      is_active?: boolean;
+      note?: string | null;
+    },
+  ) =>
+    request<RecurringExpense>(
+      "PATCH",
+      `/recurring-expenses/${recurringId}`,
+      telegramId,
+      payload,
+    ),
 };
