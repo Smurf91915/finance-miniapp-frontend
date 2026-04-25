@@ -14,6 +14,7 @@ import type {
   ParsedTransaction,
   RecurringExpense,
   SpendingAnalytics,
+  Subcategory,
   Transaction,
   TransactionType,
 } from "./lib/types";
@@ -65,6 +66,16 @@ interface SubcategoryCreateFormState {
   sortOrder: string;
 }
 
+interface CategoryEditFormState {
+  name: string;
+  sortOrder: string;
+}
+
+interface SubcategoryEditFormState {
+  name: string;
+  sortOrder: string;
+}
+
 const defaultFormState: AddFormState = {
   mode: "expense",
   amount: "",
@@ -97,6 +108,22 @@ const defaultSubcategoryFormState: SubcategoryCreateFormState = {
   name: "",
   sortOrder: "0",
 };
+
+function categoryEditStateFromItem(category: Category): CategoryEditFormState {
+  return {
+    name: category.name,
+    sortOrder: String(category.sort_order),
+  };
+}
+
+function subcategoryEditStateFromItem(
+  subcategory: Subcategory,
+): SubcategoryEditFormState {
+  return {
+    name: subcategory.name,
+    sortOrder: String(subcategory.sort_order),
+  };
+}
 
 function formatMinor(amountMinor: number): string {
   const amount = amountMinor / 100;
@@ -292,6 +319,12 @@ export default function App() {
     useState<CategoryCreateFormState>(defaultCategoryFormState);
   const [subcategoryForm, setSubcategoryForm] =
     useState<SubcategoryCreateFormState>(defaultSubcategoryFormState);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [categoryEditForm, setCategoryEditForm] =
+    useState<CategoryEditFormState | null>(null);
+  const [editingSubcategoryId, setEditingSubcategoryId] = useState<string | null>(null);
+  const [subcategoryEditForm, setSubcategoryEditForm] =
+    useState<SubcategoryEditFormState | null>(null);
   const [categorySubmitting, setCategorySubmitting] = useState(false);
   const [subcategorySubmitting, setSubcategorySubmitting] = useState(false);
   const [categoryUpdatingId, setCategoryUpdatingId] = useState<string | null>(null);
@@ -855,6 +888,108 @@ export default function App() {
       );
     } finally {
       setSubcategorySubmitting(false);
+    }
+  }
+
+  function startCategoryEdit(category: Category) {
+    setError(null);
+    setSuccess(null);
+    setEditingCategoryId(category.id);
+    setCategoryEditForm(categoryEditStateFromItem(category));
+  }
+
+  function cancelCategoryEdit() {
+    setEditingCategoryId(null);
+    setCategoryEditForm(null);
+  }
+
+  async function handleCategoryUpdate(category: Category) {
+    if (!categoryEditForm || editingCategoryId !== category.id) {
+      return;
+    }
+
+    if (!categoryEditForm.name.trim()) {
+      setError("Укажи название категории.");
+      return;
+    }
+
+    const sortOrder = Number(categoryEditForm.sortOrder || "0");
+    if (!Number.isInteger(sortOrder)) {
+      setError("Порядок категории должен быть целым числом.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setCategoryUpdatingId(category.id);
+
+    try {
+      await api.updateCategory(telegramId, category.id, {
+        name: categoryEditForm.name.trim(),
+        sort_order: sortOrder,
+      });
+      setSuccess("Категория обновлена.");
+      cancelCategoryEdit();
+      await reloadData(telegramId);
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Не удалось обновить категорию.",
+      );
+    } finally {
+      setCategoryUpdatingId(null);
+    }
+  }
+
+  function startSubcategoryEdit(subcategory: Subcategory) {
+    setError(null);
+    setSuccess(null);
+    setEditingSubcategoryId(subcategory.id);
+    setSubcategoryEditForm(subcategoryEditStateFromItem(subcategory));
+  }
+
+  function cancelSubcategoryEdit() {
+    setEditingSubcategoryId(null);
+    setSubcategoryEditForm(null);
+  }
+
+  async function handleSubcategoryUpdate(subcategory: Subcategory) {
+    if (!subcategoryEditForm || editingSubcategoryId !== subcategory.id) {
+      return;
+    }
+
+    if (!subcategoryEditForm.name.trim()) {
+      setError("Укажи название подкатегории.");
+      return;
+    }
+
+    const sortOrder = Number(subcategoryEditForm.sortOrder || "0");
+    if (!Number.isInteger(sortOrder)) {
+      setError("Порядок подкатегории должен быть целым числом.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setSubcategoryUpdatingId(subcategory.id);
+
+    try {
+      await api.updateSubcategory(telegramId, subcategory.id, {
+        name: subcategoryEditForm.name.trim(),
+        sort_order: sortOrder,
+      });
+      setSuccess("Подкатегория обновлена.");
+      cancelSubcategoryEdit();
+      await reloadData(telegramId);
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Не удалось обновить подкатегорию.",
+      );
+    } finally {
+      setSubcategoryUpdatingId(null);
     }
   }
 
@@ -1789,81 +1924,262 @@ export default function App() {
                       <div key={group.key} className="category-manager__group">
                         <h3 className="category-manager__title">{group.title}</h3>
                         <div className="category-manager__list">
-                          {group.items.map((category) => (
-                            <article key={category.id} className="category-manager__item">
-                              <div className="category-manager__head">
-                                <div>
-                                  <strong>{category.name}</strong>
-                                  <div className="transaction-row__meta">
-                                    Порядок: {category.sort_order}
-                                  </div>
-                                </div>
-                                <div className="category-manager__actions">
-                                  {category.is_archived ? (
-                                    <span className="category-manager__badge">В архиве</span>
-                                  ) : null}
-                                  <button
-                                    type="button"
-                                    className="transaction-row__action transaction-row__action--muted"
-                                    disabled={categoryUpdatingId === category.id}
-                                    onClick={() => void handleCategoryArchiveToggle(category)}
-                                  >
-                                    {categoryUpdatingId === category.id
-                                      ? "Обновляю…"
-                                      : category.is_archived
-                                        ? "Вернуть"
-                                        : "В архив"}
-                                  </button>
-                                </div>
-                              </div>
+                          {group.items.map((category) => {
+                            const isEditingCategory =
+                              editingCategoryId === category.id && categoryEditForm !== null;
 
-                              {category.subcategories.length > 0 ? (
-                                <div className="category-manager__sublist">
-                                  {category.subcategories.map((subcategory) => (
-                                    <div
-                                      key={subcategory.id}
-                                      className="category-manager__subitem"
-                                    >
-                                      <div>
-                                        <strong>{subcategory.name}</strong>
-                                        <div className="transaction-row__meta">
-                                          Порядок: {subcategory.sort_order}
-                                        </div>
+                            return (
+                              <article key={category.id} className="category-manager__item">
+                                <div className="category-manager__head">
+                                  {isEditingCategory ? (
+                                    <div className="category-manager__edit-form">
+                                      <div className="inline-grid">
+                                        <label className="field">
+                                          <span>Название</span>
+                                          <input
+                                            type="text"
+                                            value={categoryEditForm.name}
+                                            onChange={(event) =>
+                                              setCategoryEditForm((current) =>
+                                                current
+                                                  ? {
+                                                      ...current,
+                                                      name: event.target.value,
+                                                    }
+                                                  : current,
+                                              )
+                                            }
+                                            disabled={categoryUpdatingId === category.id}
+                                          />
+                                        </label>
+
+                                        <label className="field">
+                                          <span>Порядок</span>
+                                          <input
+                                            type="number"
+                                            value={categoryEditForm.sortOrder}
+                                            onChange={(event) =>
+                                              setCategoryEditForm((current) =>
+                                                current
+                                                  ? {
+                                                      ...current,
+                                                      sortOrder: event.target.value,
+                                                    }
+                                                  : current,
+                                              )
+                                            }
+                                            disabled={categoryUpdatingId === category.id}
+                                          />
+                                        </label>
                                       </div>
-                                      <div className="category-manager__actions">
-                                        {subcategory.is_archived ? (
-                                          <span className="category-manager__badge">
-                                            В архиве
-                                          </span>
-                                        ) : null}
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <strong>{category.name}</strong>
+                                      <div className="transaction-row__meta">
+                                        Порядок: {category.sort_order}
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div className="category-manager__actions">
+                                    {category.is_archived ? (
+                                      <span className="category-manager__badge">В архиве</span>
+                                    ) : null}
+                                    {isEditingCategory ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="transaction-row__action"
+                                          disabled={categoryUpdatingId === category.id}
+                                          onClick={() => void handleCategoryUpdate(category)}
+                                        >
+                                          {categoryUpdatingId === category.id
+                                            ? "Сохраняю…"
+                                            : "Сохранить"}
+                                        </button>
                                         <button
                                           type="button"
                                           className="transaction-row__action transaction-row__action--muted"
-                                          disabled={subcategoryUpdatingId === subcategory.id}
-                                          onClick={() =>
-                                            void handleSubcategoryArchiveToggle(
-                                              subcategory.id,
-                                              subcategory.is_archived,
-                                            )
-                                          }
+                                          disabled={categoryUpdatingId === category.id}
+                                          onClick={cancelCategoryEdit}
                                         >
-                                          {subcategoryUpdatingId === subcategory.id
+                                          Отмена
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="transaction-row__action"
+                                          disabled={categoryUpdatingId === category.id}
+                                          onClick={() => startCategoryEdit(category)}
+                                        >
+                                          Редактировать
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="transaction-row__action transaction-row__action--muted"
+                                          disabled={categoryUpdatingId === category.id}
+                                          onClick={() => void handleCategoryArchiveToggle(category)}
+                                        >
+                                          {categoryUpdatingId === category.id
                                             ? "Обновляю…"
-                                            : subcategory.is_archived
+                                            : category.is_archived
                                               ? "Вернуть"
                                               : "В архив"}
                                         </button>
-                                      </div>
-                                    </div>
-                                  ))}
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
-                              ) : (
-                                <div className="transaction-row__meta">
-                                  Подкатегорий пока нет.
-                                </div>
-                              )}
-                            </article>
-                          ))}
+
+                                {category.subcategories.length > 0 ? (
+                                  <div className="category-manager__sublist">
+                                    {category.subcategories.map((subcategory) => {
+                                      const isEditingSubcategory =
+                                        editingSubcategoryId === subcategory.id &&
+                                        subcategoryEditForm !== null;
+
+                                      return (
+                                        <div
+                                          key={subcategory.id}
+                                          className="category-manager__subitem"
+                                        >
+                                          {isEditingSubcategory ? (
+                                            <div className="category-manager__edit-form">
+                                              <div className="inline-grid">
+                                                <label className="field">
+                                                  <span>Название</span>
+                                                  <input
+                                                    type="text"
+                                                    value={subcategoryEditForm.name}
+                                                    onChange={(event) =>
+                                                      setSubcategoryEditForm((current) =>
+                                                        current
+                                                          ? {
+                                                              ...current,
+                                                              name: event.target.value,
+                                                            }
+                                                          : current,
+                                                      )
+                                                    }
+                                                    disabled={
+                                                      subcategoryUpdatingId === subcategory.id
+                                                    }
+                                                  />
+                                                </label>
+
+                                                <label className="field">
+                                                  <span>Порядок</span>
+                                                  <input
+                                                    type="number"
+                                                    value={subcategoryEditForm.sortOrder}
+                                                    onChange={(event) =>
+                                                      setSubcategoryEditForm((current) =>
+                                                        current
+                                                          ? {
+                                                              ...current,
+                                                              sortOrder: event.target.value,
+                                                            }
+                                                          : current,
+                                                      )
+                                                    }
+                                                    disabled={
+                                                      subcategoryUpdatingId === subcategory.id
+                                                    }
+                                                  />
+                                                </label>
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            <div>
+                                              <strong>{subcategory.name}</strong>
+                                              <div className="transaction-row__meta">
+                                                Порядок: {subcategory.sort_order}
+                                              </div>
+                                            </div>
+                                          )}
+                                          <div className="category-manager__actions">
+                                            {subcategory.is_archived ? (
+                                              <span className="category-manager__badge">
+                                                В архиве
+                                              </span>
+                                            ) : null}
+                                            {isEditingSubcategory ? (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  className="transaction-row__action"
+                                                  disabled={
+                                                    subcategoryUpdatingId === subcategory.id
+                                                  }
+                                                  onClick={() =>
+                                                    void handleSubcategoryUpdate(subcategory)
+                                                  }
+                                                >
+                                                  {subcategoryUpdatingId === subcategory.id
+                                                    ? "Сохраняю…"
+                                                    : "Сохранить"}
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  className="transaction-row__action transaction-row__action--muted"
+                                                  disabled={
+                                                    subcategoryUpdatingId === subcategory.id
+                                                  }
+                                                  onClick={cancelSubcategoryEdit}
+                                                >
+                                                  Отмена
+                                                </button>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  className="transaction-row__action"
+                                                  disabled={
+                                                    subcategoryUpdatingId === subcategory.id
+                                                  }
+                                                  onClick={() =>
+                                                    startSubcategoryEdit(subcategory)
+                                                  }
+                                                >
+                                                  Редактировать
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  className="transaction-row__action transaction-row__action--muted"
+                                                  disabled={
+                                                    subcategoryUpdatingId === subcategory.id
+                                                  }
+                                                  onClick={() =>
+                                                    void handleSubcategoryArchiveToggle(
+                                                      subcategory.id,
+                                                      subcategory.is_archived,
+                                                    )
+                                                  }
+                                                >
+                                                  {subcategoryUpdatingId === subcategory.id
+                                                    ? "Обновляю…"
+                                                    : subcategory.is_archived
+                                                      ? "Вернуть"
+                                                      : "В архив"}
+                                                </button>
+                                              </>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (
+                                  <div className="transaction-row__meta">
+                                    Подкатегорий пока нет.
+                                  </div>
+                                )}
+                              </article>
+                            );
+                          })}
                           {group.items.length === 0 ? (
                             <div className="empty-state">Пока пусто.</div>
                           ) : null}
