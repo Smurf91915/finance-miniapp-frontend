@@ -83,6 +83,7 @@ interface HistoryFilterState {
   type: string;
   categoryId: string;
   goalId: string;
+  search: string;
 }
 
 const defaultFormState: AddFormState = {
@@ -125,6 +126,7 @@ const defaultHistoryFilterState: HistoryFilterState = {
   type: "",
   categoryId: "",
   goalId: "",
+  search: "",
 };
 
 function categoryEditStateFromItem(category: Category): CategoryEditFormState {
@@ -531,6 +533,24 @@ export default function App() {
       items: investmentCategories,
     },
   ] as const;
+  const normalizedHistorySearch = historyFilters.search.trim().toLowerCase();
+  const displayedTransactions = normalizedHistorySearch
+    ? transactions.filter((transaction) => {
+        const haystack = [
+          transaction.note,
+          transaction.category_name,
+          transaction.subcategory_name,
+          transaction.goal_name,
+          transactionLabel(transaction),
+          friendlyType(transaction.type),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return haystack.includes(normalizedHistorySearch);
+      })
+    : transactions;
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2488,6 +2508,21 @@ export default function App() {
                   </select>
                 </label>
 
+                <label className="field">
+                  <span>Поиск по истории</span>
+                  <input
+                    type="search"
+                    placeholder="Комментарий, категория, цель"
+                    value={historyFilters.search}
+                    onChange={(event) =>
+                      setHistoryFilters((current) => ({
+                        ...current,
+                        search: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+
                 <div className="history-filters__actions">
                   <button
                     type="button"
@@ -2511,14 +2546,14 @@ export default function App() {
               <div className="history-summary">
                 {historyLoading
                   ? "Обновляю список операций…"
-                  : `Найдено операций: ${transactions.length}`}
+                  : `Найдено операций: ${displayedTransactions.length}`}
               </div>
 
               {historyLoading ? (
                 <div className="loading-card">Обновляю историю операций…</div>
               ) : (
               <div className="transaction-list">
-                {transactions.map((transaction) => {
+                {displayedTransactions.map((transaction) => {
                   const remainingMinor = refundableRemainingMinor(
                     transaction,
                     transactions,
@@ -2630,7 +2665,7 @@ export default function App() {
                   </article>
                   );
                 })}
-                {transactions.length === 0 ? (
+                {displayedTransactions.length === 0 ? (
                   <div className="empty-state">
                     По выбранным фильтрам операций не нашлось.
                   </div>
