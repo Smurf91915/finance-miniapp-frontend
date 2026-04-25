@@ -187,6 +187,13 @@ function dateTimeLocalValueToIso(input: string): string {
   return date.toISOString();
 }
 
+function isValidDateTimeLocalValue(input: string): boolean {
+  if (!input.trim()) {
+    return false;
+  }
+  return !Number.isNaN(new Date(input).getTime());
+}
+
 function buildDefaultFormState(goalId = ""): AddFormState {
   return {
     ...defaultFormState,
@@ -377,6 +384,7 @@ export default function App() {
   const [goalHistoryItems, setGoalHistoryItems] = useState<GoalHistoryItem[]>([]);
   const [goalHistoryLoading, setGoalHistoryLoading] = useState(false);
   const [quickEntryText, setQuickEntryText] = useState("");
+  const [quickEntryOccurredAt, setQuickEntryOccurredAt] = useState(() => nowDateTimeLocalValue());
   const [quickEntryReserveAmount, setQuickEntryReserveAmount] = useState("");
   const [parsedTransaction, setParsedTransaction] = useState<ParsedTransaction | null>(null);
   const [parsingTransaction, setParsingTransaction] = useState(false);
@@ -564,9 +572,14 @@ export default function App() {
       setSubmitting(false);
       return;
     }
-    const occurredAt = form.occurredAt
-      ? dateTimeLocalValueToIso(form.occurredAt)
-      : new Date().toISOString();
+
+    if (!isValidDateTimeLocalValue(form.occurredAt)) {
+      setError("Укажи корректные дату и время операции.");
+      setSubmitting(false);
+      return;
+    }
+
+    const occurredAt = dateTimeLocalValueToIso(form.occurredAt);
 
     try {
       if (editingTransaction) {
@@ -705,6 +718,7 @@ export default function App() {
       ...buildDefaultFormState(parsed.goal_id ?? goals[0]?.id ?? ""),
       mode: parsed.type,
       amount: toInputAmount(parsed.amount_minor),
+      occurredAt: quickEntryOccurredAt,
       note: parsed.note ?? quickEntryText,
       categoryId: parsed.category_id ?? "",
       subcategoryId: parsed.subcategory_id ?? "",
@@ -751,6 +765,12 @@ export default function App() {
       return;
     }
 
+    if (!isValidDateTimeLocalValue(quickEntryOccurredAt)) {
+      setError("Укажи корректные дату и время операции.");
+      return;
+    }
+
+    const occurredAt = dateTimeLocalValueToIso(quickEntryOccurredAt);
     let reserveAmountMinor: number | null = null;
     if (parsedTransaction.type === "income" && quickEntryReserveAmount.trim()) {
       reserveAmountMinor = toMinor(quickEntryReserveAmount);
@@ -769,7 +789,7 @@ export default function App() {
         await api.createIncome(telegramId, {
           amount_minor: parsedTransaction.amount_minor,
           currency: parsedTransaction.currency,
-          occurred_at: new Date().toISOString(),
+          occurred_at: occurredAt,
           note: parsedTransaction.note ?? quickEntryText,
           reserve_amount_minor: reserveAmountMinor,
           source: "mini_app",
@@ -780,7 +800,7 @@ export default function App() {
         await api.createExpense(telegramId, {
           amount_minor: parsedTransaction.amount_minor,
           currency: parsedTransaction.currency,
-          occurred_at: new Date().toISOString(),
+          occurred_at: occurredAt,
           category_id: parsedTransaction.category_id,
           subcategory_id: parsedTransaction.subcategory_id,
           note: parsedTransaction.note ?? quickEntryText,
@@ -792,7 +812,7 @@ export default function App() {
         await api.createInvestment(telegramId, {
           amount_minor: parsedTransaction.amount_minor,
           currency: parsedTransaction.currency,
-          occurred_at: new Date().toISOString(),
+          occurred_at: occurredAt,
           category_id: parsedTransaction.category_id,
           subcategory_id: parsedTransaction.subcategory_id,
           note: parsedTransaction.note ?? quickEntryText,
@@ -804,7 +824,7 @@ export default function App() {
         await api.allocateGoal(telegramId, parsedTransaction.goal_id, {
           amount_minor: parsedTransaction.amount_minor,
           currency: parsedTransaction.currency,
-          occurred_at: new Date().toISOString(),
+          occurred_at: occurredAt,
           note: parsedTransaction.note ?? quickEntryText,
           source: "mini_app",
         });
@@ -812,6 +832,7 @@ export default function App() {
 
       setSuccess("Операция записана по текстовому вводу.");
       setQuickEntryText("");
+      setQuickEntryOccurredAt(nowDateTimeLocalValue());
       setQuickEntryReserveAmount("");
       setParsedTransaction(null);
       await reloadData(telegramId);
@@ -1616,6 +1637,17 @@ export default function App() {
                     />
                   </label>
 
+                  <label className="field">
+                    <span>Дата и время</span>
+                    <input
+                      type="datetime-local"
+                      value={quickEntryOccurredAt}
+                      required
+                      onChange={(event) => setQuickEntryOccurredAt(event.target.value)}
+                      disabled={parsingTransaction || quickEntrySubmitting}
+                    />
+                  </label>
+
                   <div className="quick-entry__actions">
                     <button
                       type="button"
@@ -1774,6 +1806,7 @@ export default function App() {
                   <input
                     type="datetime-local"
                     value={form.occurredAt}
+                    required
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
