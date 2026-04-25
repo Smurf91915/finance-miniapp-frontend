@@ -25,6 +25,7 @@ type AddMode = "expense" | "income" | "investment" | "goal_allocation";
 interface AddFormState {
   mode: AddMode;
   amount: string;
+  occurredAt: string;
   note: string;
   categoryId: string;
   subcategoryId: string;
@@ -79,6 +80,7 @@ interface SubcategoryEditFormState {
 const defaultFormState: AddFormState = {
   mode: "expense",
   amount: "",
+  occurredAt: "",
   note: "",
   categoryId: "",
   subcategoryId: "",
@@ -132,6 +134,43 @@ function formatMinor(amountMinor: number): string {
     currency: "RUB",
     maximumFractionDigits: 0,
   });
+}
+
+function formatDateTimeLocalValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function nowDateTimeLocalValue(): string {
+  return formatDateTimeLocalValue(new Date());
+}
+
+function isoToDateTimeLocalValue(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return nowDateTimeLocalValue();
+  }
+  return formatDateTimeLocalValue(date);
+}
+
+function dateTimeLocalValueToIso(input: string): string {
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString();
+  }
+  return date.toISOString();
+}
+
+function buildDefaultFormState(goalId = ""): AddFormState {
+  return {
+    ...defaultFormState,
+    goalId,
+    occurredAt: nowDateTimeLocalValue(),
+  };
 }
 
 function toMinor(input: string): number {
@@ -293,7 +332,7 @@ export default function App() {
   const [goalAnalytics, setGoalAnalytics] = useState<GoalAnalytics | null>(null);
   const [spending, setSpending] = useState<SpendingAnalytics | null>(null);
   const [recurring, setRecurring] = useState<RecurringExpense[]>([]);
-  const [form, setForm] = useState<AddFormState>(defaultFormState);
+  const [form, setForm] = useState<AddFormState>(() => buildDefaultFormState());
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -444,7 +483,9 @@ export default function App() {
       setSubmitting(false);
       return;
     }
-    const occurredAt = editingTransaction?.occurred_at ?? new Date().toISOString();
+    const occurredAt = form.occurredAt
+      ? dateTimeLocalValueToIso(form.occurredAt)
+      : new Date().toISOString();
 
     try {
       if (editingTransaction) {
@@ -532,10 +573,7 @@ export default function App() {
         setSuccess("Пополнение цели записано.");
       }
 
-      setForm({
-        ...defaultFormState,
-        goalId: goals[0]?.id ?? "",
-      });
+      setForm(buildDefaultFormState(goals[0]?.id ?? ""));
       setEditingTransactionId(null);
       await reloadData(telegramId);
       setActiveTab("home");
@@ -583,13 +621,12 @@ export default function App() {
     setError(null);
     setSuccess(null);
     setForm({
-      ...defaultFormState,
+      ...buildDefaultFormState(parsed.goal_id ?? goals[0]?.id ?? ""),
       mode: parsed.type,
       amount: toInputAmount(parsed.amount_minor),
       note: parsed.note ?? quickEntryText,
       categoryId: parsed.category_id ?? "",
       subcategoryId: parsed.subcategory_id ?? "",
-      goalId: parsed.goal_id ?? goals[0]?.id ?? "",
       reserveAmount: quickEntryReserveAmount,
     });
   }
@@ -771,9 +808,8 @@ export default function App() {
     setError(null);
     setSuccess(null);
     setForm({
-      ...defaultFormState,
+      ...buildDefaultFormState(goal.id),
       mode: "goal_allocation",
-      goalId: goal.id,
     });
     setActiveTab("add");
   }
@@ -1252,23 +1288,20 @@ export default function App() {
     cancelRefund();
     setEditingTransactionId(transaction.id);
     setForm({
-      ...defaultFormState,
+      ...buildDefaultFormState(transaction.goal_id ?? goals[0]?.id ?? ""),
       mode,
       amount: toInputAmount(transaction.amount_minor),
+      occurredAt: isoToDateTimeLocalValue(transaction.occurred_at),
       note: transaction.note ?? "",
       categoryId: transaction.category_id ?? "",
       subcategoryId: transaction.subcategory_id ?? "",
-      goalId: transaction.goal_id ?? goals[0]?.id ?? "",
     });
     setActiveTab("add");
   }
 
   function cancelEditing() {
     setEditingTransactionId(null);
-    setForm({
-      ...defaultFormState,
-      goalId: goals[0]?.id ?? "",
-    });
+    setForm(buildDefaultFormState(goals[0]?.id ?? ""));
   }
 
   async function handleDelete(transaction: Transaction) {
@@ -1372,9 +1405,8 @@ export default function App() {
                 <button type="button" className="action-pill" onClick={() => {
                   setEditingTransactionId(null);
                   setForm((current) => ({
-                    ...defaultFormState,
+                    ...buildDefaultFormState(current.goalId || goals[0]?.id || ""),
                     mode: "expense",
-                    goalId: current.goalId || goals[0]?.id || "",
                   }));
                   setActiveTab("add");
                 }}>
@@ -1383,9 +1415,8 @@ export default function App() {
                 <button type="button" className="action-pill" onClick={() => {
                   setEditingTransactionId(null);
                   setForm((current) => ({
-                    ...defaultFormState,
+                    ...buildDefaultFormState(current.goalId || goals[0]?.id || ""),
                     mode: "income",
-                    goalId: current.goalId || goals[0]?.id || "",
                   }));
                   setActiveTab("add");
                 }}>
@@ -1394,9 +1425,8 @@ export default function App() {
                 <button type="button" className="action-pill" onClick={() => {
                   setEditingTransactionId(null);
                   setForm((current) => ({
-                    ...defaultFormState,
+                    ...buildDefaultFormState(current.goalId || goals[0]?.id || ""),
                     mode: "goal_allocation",
-                    goalId: current.goalId || goals[0]?.id || "",
                   }));
                   setActiveTab("add");
                 }}>
@@ -1405,9 +1435,8 @@ export default function App() {
                 <button type="button" className="action-pill" onClick={() => {
                   setEditingTransactionId(null);
                   setForm((current) => ({
-                    ...defaultFormState,
+                    ...buildDefaultFormState(current.goalId || goals[0]?.id || ""),
                     mode: "investment",
-                    goalId: current.goalId || goals[0]?.id || "",
                   }));
                   setActiveTab("add");
                 }}>
@@ -1593,9 +1622,8 @@ export default function App() {
                         onClick={() => {
                           setEditingTransactionId(null);
                           setForm((current) => ({
-                            ...defaultFormState,
+                            ...buildDefaultFormState(current.goalId || goals[0]?.id || ""),
                             mode: value as AddMode,
-                            goalId: current.goalId || goals[0]?.id || "",
                           }));
                         }}
                       >
@@ -1614,6 +1642,20 @@ export default function App() {
                     value={form.amount}
                     onChange={(event) =>
                       setForm((current) => ({ ...current, amount: event.target.value }))
+                    }
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Дата и время</span>
+                  <input
+                    type="datetime-local"
+                    value={form.occurredAt}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        occurredAt: event.target.value,
+                      }))
                     }
                   />
                 </label>
