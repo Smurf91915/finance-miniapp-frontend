@@ -187,13 +187,6 @@ function dateTimeLocalValueToIso(input: string): string {
   return date.toISOString();
 }
 
-function isValidDateTimeLocalValue(input: string): boolean {
-  if (!input.trim()) {
-    return false;
-  }
-  return !Number.isNaN(new Date(input).getTime());
-}
-
 function buildDefaultFormState(goalId = ""): AddFormState {
   return {
     ...defaultFormState,
@@ -573,12 +566,6 @@ export default function App() {
       return;
     }
 
-    if (!isValidDateTimeLocalValue(form.occurredAt)) {
-      setError("Укажи корректные дату и время операции.");
-      setSubmitting(false);
-      return;
-    }
-
     const occurredAt = dateTimeLocalValueToIso(form.occurredAt);
 
     try {
@@ -762,11 +749,6 @@ export default function App() {
 
     if (!parsedTransactionCanSave(parsedTransaction)) {
       setError("Нужна ручная проверка: приложение не смогло полностью определить цель или категорию.");
-      return;
-    }
-
-    if (!isValidDateTimeLocalValue(quickEntryOccurredAt)) {
-      setError("Укажи корректные дату и время операции.");
       return;
     }
 
@@ -1642,7 +1624,6 @@ export default function App() {
                     <input
                       type="datetime-local"
                       value={quickEntryOccurredAt}
-                      required
                       onChange={(event) => setQuickEntryOccurredAt(event.target.value)}
                       disabled={parsingTransaction || quickEntrySubmitting}
                     />
@@ -1806,7 +1787,6 @@ export default function App() {
                   <input
                     type="datetime-local"
                     value={form.occurredAt}
-                    required
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,

@@ -53,3 +53,24 @@ VITE_API_BASE_URL=https://<api-domain>/api/v1
 
 - в `MINI_APP_URL` у bot service
 - в `CORS_ALLOWED_ORIGINS` у API service
+
+## Render
+
+В репозитории есть `render.yaml` для Render Static Site.
+
+Если создавать сервис вручную:
+
+```env
+VITE_API_BASE_URL=https://<backend-domain>/api/v1
+```
+
+Параметры:
+
+- runtime: `Static Site`
+- build command: `npm install && npm run build`
+- publish directory: `dist`
+
+После деплоя скопируй frontend URL и пропиши его в backend:
+
+- `MINI_APP_URL=https://<frontend-domain>`
+- `CORS_ALLOWED_ORIGINS=https://<frontend-domain>`
