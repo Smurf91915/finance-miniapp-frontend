@@ -14,6 +14,19 @@ import { getTelegramInitData } from "./telegram";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1";
+const ALLOW_INSECURE_DEV_AUTH =
+  import.meta.env.DEV && import.meta.env.VITE_ALLOW_INSECURE_DEV_AUTH === "true";
+const DEV_TELEGRAM_ID = Number(import.meta.env.VITE_DEV_TELEGRAM_ID ?? "");
+
+function resolvedDevTelegramId(telegramId: number | null): number | null {
+  if (telegramId) {
+    return telegramId;
+  }
+
+  return Number.isInteger(DEV_TELEGRAM_ID) && DEV_TELEGRAM_ID > 0
+    ? DEV_TELEGRAM_ID
+    : null;
+}
 
 type ApiMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -48,8 +61,11 @@ async function request<T>(
 
   if (initData) {
     headers["X-Telegram-Init-Data"] = initData;
-  } else if (telegramId) {
-    headers["X-Telegram-Id"] = String(telegramId);
+  } else if (ALLOW_INSECURE_DEV_AUTH) {
+    const devTelegramId = resolvedDevTelegramId(telegramId);
+    if (devTelegramId) {
+      headers["X-Telegram-Id"] = String(devTelegramId);
+    }
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
