@@ -247,6 +247,15 @@ function friendlyGoalKind(kind: string): string {
   }
 }
 
+function normalizeLookupText(value: string): string {
+  return value.trim().toLowerCase().replace(/ё/g, "е");
+}
+
+function extractLookupTokens(value: string): string[] {
+  const matches = normalizeLookupText(value).match(/[a-zа-я0-9]+/g) ?? [];
+  return [...new Set(matches.filter((token) => token.length >= 2))];
+}
+
 function parsedTransactionCanSave(parsed: ParsedTransaction): boolean {
   if (parsed.type === "income") {
     return true;
@@ -342,6 +351,76 @@ function recurringEditStateFromItem(item: RecurringExpense): RecurringEditFormSt
     dayOfMonth: item.day_of_month ? String(item.day_of_month) : "",
     note: item.note ?? "",
   };
+}
+
+function suggestedCategoriesForParsedTransaction(
+  parsed: ParsedTransaction | null,
+  rawText: string,
+  categories: Category[],
+): Category[] {
+  if (!parsed || (parsed.type !== "expense" && parsed.type !== "investment")) {
+    return [];
+  }
+
+  const lookupText = normalizeLookupText(parsed.note ?? rawText);
+  const tokens = extractLookupTokens(parsed.note ?? rawText);
+  const ranked = categories
+    .filter((category) => !category.is_archived)
+    .map((category) => {
+      const normalizedName = normalizeLookupText(category.name);
+      let score = category.kind === parsed.type ? 3 : 0;
+
+      if (lookupText && lookupText.includes(normalizedName)) {
+        score += 8;
+      }
+
+      for (const token of tokens) {
+        if (normalizedName.includes(token) || token.includes(normalizedName)) {
+          score += 3;
+        }
+      }
+
+      for (const subcategory of category.subcategories) {
+        if (subcategory.is_archived) {
+          continue;
+        }
+
+        const normalizedSubcategory = normalizeLookupText(subcategory.name);
+        if (lookupText && lookupText.includes(normalizedSubcategory)) {
+          score += 6;
+        }
+
+        for (const token of tokens) {
+          if (
+            normalizedSubcategory.includes(token) ||
+            token.includes(normalizedSubcategory)
+          ) {
+            score += 2;
+          }
+        }
+      }
+
+      return { category, score };
+    })
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      if (left.category.sort_order !== right.category.sort_order) {
+        return left.category.sort_order - right.category.sort_order;
+      }
+      return left.category.name.localeCompare(right.category.name, "ru");
+    });
+
+  const relevant = ranked.filter((item) => item.score > 0).slice(0, 6);
+  if (relevant.length > 0) {
+    return relevant.map((item) => item.category);
+  }
+
+  return ranked
+    .filter((item) => item.category.kind === parsed.type)
+    .slice(0, 6)
+    .map((item) => item.category);
 }
 
 export default function App() {
@@ -521,6 +600,11 @@ export default function App() {
     recurringEditCategory?.subcategories.filter((subcategory) => !subcategory.is_archived) ?? [];
   const availableSubcategoryCategories = categories.filter(
     (category) => !category.is_archived,
+  );
+  const quickEntryCategorySuggestions = suggestedCategoriesForParsedTransaction(
+    parsedTransaction,
+    quickEntryText,
+    categories,
   );
   const categoryGroups = [
     {
@@ -711,6 +795,23 @@ export default function App() {
       subcategoryId: parsed.subcategory_id ?? "",
       reserveAmount: quickEntryReserveAmount,
     });
+  }
+
+  function applyQuickEntryCategorySuggestion(category: Category) {
+    setParsedTransaction((current) => {
+      if (!current || (current.type !== "expense" && current.type !== "investment")) {
+        return current;
+      }
+
+      return {
+        ...current,
+        type: category.kind === "investment" ? "investment" : "expense",
+        category_id: category.id,
+        subcategory_id: null,
+      };
+    });
+    setError(null);
+    setSuccess(`Категория выбрана: ${category.name}. Теперь запись можно сохранить.`);
   }
 
   async function handleQuickParse() {
@@ -1684,6 +1785,32 @@ export default function App() {
                             disabled={quickEntrySubmitting}
                           />
                         </label>
+                      ) : null}
+
+                      {!parsedTransaction.category_id &&
+                      (parsedTransaction.type === "expense" ||
+                        parsedTransaction.type === "investment") &&
+                      quickEntryCategorySuggestions.length > 0 ? (
+                        <div className="quick-entry__suggestions">
+                          <div className="quick-entry__hint">
+                            Если категория не угадалась, выбери подходящий вариант:
+                          </div>
+                          <div className="quick-entry__suggestion-grid">
+                            {quickEntryCategorySuggestions.map((category) => (
+                              <button
+                                key={category.id}
+                                type="button"
+                                className="quick-entry__suggestion"
+                                disabled={quickEntrySubmitting}
+                                onClick={() =>
+                                  applyQuickEntryCategorySuggestion(category)
+                                }
+                              >
+                                {category.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       ) : null}
 
                       {!parsedTransactionCanSave(parsedTransaction) ? (
