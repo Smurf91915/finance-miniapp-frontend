@@ -36,6 +36,24 @@ npm run dev -- --host 0.0.0.0 --port 5173
 - backend должен знать `BOT_TOKEN`, чтобы валидировать `Telegram.WebApp.initData`;
 - для локальной разработки можно открыть приложение обычной ссылкой в браузере.
 
+## Vercel
+
+Во frontend-репозитории есть `vercel.json` для SPA fallback. Для production deploy достаточно:
+
+```env
+VITE_API_BASE_URL=https://<backend-domain>/api/v1
+```
+
+После деплоя возьми публичный frontend URL и пропиши его в backend:
+
+- `MINI_APP_URL=https://<frontend-domain>`
+- `CORS_ALLOWED_ORIGINS=https://<frontend-domain>`
+
+Если backend работает в webhook-режиме на Vercel, после обновления доменов проверь:
+
+- `https://<backend-domain>/health`
+- `getWebhookInfo` должен вернуть `https://<backend-domain>/telegram/webhook`
+
 ## Railway без туннелей
 
 В репозитории есть production runtime для Railway:
